@@ -1,0 +1,189 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user account with specific role.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "branch", "receptionist", "purchasing"] },
+        "branchName": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "pin": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "role", "isActive", "pin"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Branch order request.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderNo": { "type": "string" },
+        "branchId": { "type": "string" },
+        "branchName": { "type": "string" },
+        "productCode": { "type": "string" },
+        "productName": { "type": "string" },
+        "specs": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "receivedQuantity": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending_confirm", "pending_purchase", "purchased", "completed"] },
+        "supplier": { "type": "string" },
+        "purchaseOrderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "confirmedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "orderNo", "branchId", "branchName", "productCode", "productName", "specs", "quantity", "status"]
+    },
+    "PurchaseOrder": {
+      "title": "PurchaseOrder",
+      "description": "Purchase order sent to supplier/factory.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "poNo": { "type": "string" },
+        "supplier": { "type": "string" },
+        "orderDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending_arrival", "completed"] },
+        "remarks": { "type": "string" },
+        "orderIds": { "type": "array" },
+        "totalQuantity": { "type": "integer" },
+        "factoryStatus": { "type": "string" },
+        "expectedArrivalDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "poNo", "supplier", "orderDate", "status", "orderIds"]
+    },
+    "Arrival": {
+      "title": "Arrival",
+      "description": "Records arrival of goods at branch/warehouse.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "poId": { "type": "string" },
+        "poNo": { "type": "string" },
+        "orderId": { "type": "string" },
+        "receivedQty": { "type": "integer" },
+        "arrivalDate": { "type": "string", "format": "date-time" },
+        "operator": { "type": "string" }
+      },
+      "required": ["id", "poId", "poNo", "orderId", "receivedQty", "arrivalDate", "operator"]
+    },
+    "Config": {
+      "title": "Config",
+      "description": "System alarm thresholds and other settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "shortageThreshold": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "shortageThreshold", "updatedAt"]
+    },
+    "Log": {
+      "title": "Log",
+      "description": "System operations log.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "role", "action", "details", "timestamp"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Information about a product.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productCode": { "type": "string" },
+        "productName": { "type": "string" },
+        "specs": { "type": "string" },
+        "unit": { "type": "string" },
+        "defaultSupplier": { "type": "string" },
+        "isApproved": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "productCode", "productName", "specs", "unit", "defaultSupplier", "isApproved"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Information about a supplier.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "contact": { "type": "string" },
+        "phone": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "contact", "phone", "isActive"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Headquarters stock record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productCode": { "type": "string" },
+        "productName": { "type": "string" },
+        "specs": { "type": "string" },
+        "currentStock": { "type": "integer" },
+        "safeStock": { "type": "integer" },
+        "supplier": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "productCode", "productName", "currentStock", "safeStock", "supplier"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "Listing of all user accounts created or managed by admin."
+    },
+    "orders": {
+      "schema": "Order",
+      "description": "All orders created by branch users."
+    },
+    "purchase_orders": {
+      "schema": "PurchaseOrder",
+      "description": "Grouped purchasing orders generated by purchasing role."
+    },
+    "arrivals": {
+      "schema": "Arrival",
+      "description": "Detailed log of product arrivals."
+    },
+    "configs": {
+      "schema": "Config",
+      "description": "Global settings for system warnings/alarm thresholds."
+    },
+    "logs": {
+      "schema": "Log",
+      "description": "Audit trail log of operations conducted."
+    },
+    "inventory": {
+      "schema": "InventoryItem",
+      "description": "Headquarters active warehouse stock registry."
+    },
+    "products": {
+      "schema": "Product",
+      "description": "Comprehensive item master list / catalog."
+    },
+    "suppliers": {
+      "schema": "Supplier",
+      "description": "Active supplier and master partner details."
+    }
+  }
+}

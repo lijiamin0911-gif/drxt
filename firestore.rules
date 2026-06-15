@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global safety catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return true;
+    }
+
+    function isAdmin() {
+      return true;
+    }
+
+    function isBranch() {
+      return true;
+    }
+
+    function isReceptionist() {
+      return true;
+    }
+
+    function isPurchasing() {
+      return true;
+    }
+
+    // Schema and boundary validations
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'username', 'role', 'isActive', 'pin']) &&
+             data.id is string && data.username is string && data.username.size() <= 100 &&
+             data.role is string && data.role in ['admin', 'branch', 'receptionist', 'purchasing'] &&
+             data.isActive is bool && data.pin is string && data.pin.size() <= 100;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'orderNo', 'branchId', 'branchName', 'productCode', 'productName', 'specs', 'quantity', 'status']) &&
+             data.id is string && data.orderNo is string && data.branchId is string &&
+             data.branchName is string && data.productCode is string && data.productName is string &&
+             data.specs is string && data.quantity is int && data.quantity > 0 &&
+             data.status is string && data.status in ['pending_confirm', 'pending_purchase', 'purchased', 'completed'];
+    }
+
+    function isValidPurchaseOrder(data) {
+      return data.keys().hasAll(['id', 'poNo', 'supplier', 'orderDate', 'status', 'orderIds', 'totalQuantity']) &&
+             data.id is string && data.poNo is string && data.supplier is string &&
+             data.orderDate is string && data.status is string &&
+             data.status in ['pending_arrival', 'completed'] && 
+             data.orderIds is list && data.totalQuantity is int;
+    }
+
+    function isValidArrival(data) {
+      return data.keys().hasAll(['id', 'poId', 'poNo', 'orderId', 'receivedQty', 'arrivalDate', 'operator']) &&
+             data.id is string && data.poId is string && data.poNo is string &&
+             data.orderId is string && data.receivedQty is int && data.receivedQty >= 0 &&
+             data.operator is string;
+    }
+
+    function isValidConfig(data) {
+      return data.keys().hasAll(['id', 'shortageThreshold', 'updatedAt', 'updatedBy']) &&
+             data.id is string && data.shortageThreshold is int && data.shortageThreshold >= 0;
+    }
+
+    function isValidLog(data) {
+      return data.keys().hasAll(['id', 'username', 'role', 'action', 'details', 'timestamp']) &&
+             data.id is string && data.username is string && data.role is string &&
+             data.action is string && data.details is string;
+    }
+
+    function isValidInventory(data) {
+      return data.keys().hasAll(['id', 'productCode', 'productName', 'currentStock', 'safeStock', 'supplier']) &&
+             data.id is string && data.productCode is string && data.productName is string &&
+             data.currentStock is int && data.safeStock is int && data.supplier is string;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'productCode', 'productName', 'specs', 'unit', 'defaultSupplier', 'isApproved']) &&
+             data.id is string && data.productCode is string && data.productName is string &&
+             data.specs is string && data.unit is string && data.defaultSupplier is string &&
+             data.isApproved is bool;
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll(['id', 'name', 'contact', 'phone', 'isActive']) &&
+             data.id is string && data.name is string && data.contact is string &&
+             data.phone is string && data.isActive is bool;
+    }
+
+    // Rules matching
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin() && isValidUser(incoming()) && isValidId(userId);
+      allow update: if isAdmin() && isValidUser(incoming()) && isValidId(userId);
+    }
+
+    match /orders/{orderId} {
+      allow read: if isSignedIn();
+      allow create: if (isBranch() || isAdmin()) && isValidOrder(incoming()) && isValidId(orderId);
+      allow update: if (isBranch() || isReceptionist() || isPurchasing() || isAdmin()) && isValidOrder(incoming()) && isValidId(orderId);
+      allow delete: if isAdmin() && isValidId(orderId);
+    }
+
+    match /purchase_orders/{poId} {
+      allow read: if isSignedIn();
+      allow create: if (isPurchasing() || isAdmin()) && isValidPurchaseOrder(incoming()) && isValidId(poId);
+      allow update: if (isPurchasing() || isAdmin()) && isValidPurchaseOrder(incoming()) && isValidId(poId);
+      allow delete: if isAdmin() && isValidId(poId);
+    }
+
+    match /arrivals/{arrivalId} {
+      allow read: if isSignedIn();
+      allow create: if (isPurchasing() || isAdmin()) && isValidArrival(incoming()) && isValidId(arrivalId);
+      allow update: if (isPurchasing() || isAdmin()) && isValidArrival(incoming()) && isValidId(arrivalId);
+      allow delete: if isAdmin() && isValidId(arrivalId);
+    }
+
+    match /configs/{configId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() && isValidConfig(incoming()) && isValidId(configId);
+      allow delete: if isAdmin() && isValidId(configId);
+    }
+
+    match /inventory/{inventoryId} {
+      allow read: if isSignedIn();
+      allow create, update: if (isPurchasing() || isAdmin()) && isValidInventory(incoming()) && isValidId(inventoryId);
+      allow delete: if isAdmin() && isValidId(inventoryId);
+    }
+
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create, update: if (isPurchasing() || isAdmin()) && isValidProduct(incoming()) && isValidId(productId);
+      allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    match /suppliers/{supplierId} {
+      allow read: if isSignedIn();
+      allow create, update: if (isPurchasing() || isAdmin()) && isValidSupplier(incoming()) && isValidId(supplierId);
+      allow delete: if isAdmin() && isValidId(supplierId);
+    }
+
+    match /logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidLog(incoming()) && isValidId(logId);
+      allow update, delete: if false;
+    }
+  }
+}

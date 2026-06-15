@@ -1,0 +1,8 @@
+{
+  "name": "Remix: 多分店订单协同管理系统",
+  "description": "支持管理员、分店、前台、采购等多角色订单流转、采购单汇总、欠货跟踪与一键补货的多分店协同管理系统。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
