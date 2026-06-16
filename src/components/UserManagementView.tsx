@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { 
   UserPlus, 
   Trash2, 
@@ -13,7 +14,11 @@ import {
   Truck,
   Plus,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  AlertCircle
 } from 'lucide-react';
 import { User, Role, Supplier } from '../types';
 import { DbService } from '../lib/dbService';
@@ -64,6 +69,11 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
   const [editRole, setEditRole] = useState<Role>('branch');
   const [editBranchName, setEditBranchName] = useState('');
   const [editPin, setEditPin] = useState('');
+
+  // Account Bulk Excel Import/Export Workspace States
+  const [showImportUserPanel, setShowImportUserPanel] = useState(false);
+  const [importUsersPreview, setImportUsersPreview] = useState<{ username: string; role: Role; branchName?: string; pin: string; isActive: boolean; error?: string }[]>([]);
+  const [importOverwrite, setImportOverwrite] = useState(true);
 
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,6 +167,197 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       alert(`账户 [${newUser.username}] 创建成功！`);
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // --- Account Template download & exporting ---
+  const downloadAccountTemplate = () => {
+    try {
+      const data = [
+        ["账号名称（必填，唯一例: 城东分店）", "权限身份（必填：分店 / 采购 / 前台 / 管理员）", "关联分店名称（仅分店填，必须和实际名称一致）", "登录密码PIN码（推荐至少4位数字）", "是否启用（是 / 否）"],
+        ["城东一号店", "分店", "城东第一分店", "123456", "是"],
+        ["城西二号店", "分店", "城西第二分店", "888888", "是"],
+        ["采购主管小陈", "采购", "", "666666", "是"],
+        ["前台助理阿花", "前台", "", "999999", "是"],
+        ["临过期休眠分店", "分店", "城南旧货仓库", "111111", "否"]
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      
+      ws['!cols'] = [
+        { wch: 25 },
+        { wch: 38 },
+        { wch: 35 },
+        { wch: 28 },
+        { wch: 15 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "系统账号批量录入模板");
+      XLSX.writeFile(wb, "多分店协同系统_账号批量导入导入模板.xlsx");
+    } catch (err: any) {
+      alert("下载模板出错：" + err.message);
+    }
+  };
+
+  const exportCurrentAccounts = () => {
+    try {
+      const data = [
+        ["账号名称（必填，唯一例: 城东分店）", "权限身份（必填：分店 / 采购 / 前台 / 管理员）", "关联分店名称（仅分店填，必须和实际名称一致）", "登录密码PIN码（推荐至少4位数字）", "是否启用（是 / 否）"]
+      ];
+
+      const roleNameMap: Record<Role, string> = {
+        'admin': '管理员',
+        'branch': '分店',
+        'receptionist': '前台',
+        'purchasing': '采购'
+      };
+
+      users.forEach(u => {
+        data.push([
+          u.username,
+          roleNameMap[u.role] || u.role,
+          u.branchName || '',
+          u.pin,
+          u.isActive !== false ? '是' : '否'
+        ]);
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      
+      ws['!cols'] = [
+        { wch: 25 },
+        { wch: 38 },
+        { wch: 35 },
+        { wch: 28 },
+        { wch: 15 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "系统正在运行账号数据表");
+      XLSX.writeFile(wb, "系统运行中账号导出数据.xlsx");
+    } catch (err: any) {
+      alert("导出数据出错：" + err.message);
+    }
+  };
+
+  const handleImportUsersFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const resultBinary = evt.target?.result;
+        if (!resultBinary) return;
+        const data = new Uint8Array(resultBinary as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        const parsedUsers: typeof importUsersPreview = [];
+        let headerSkipped = false;
+
+        const roleMap: Record<string, Role> = {
+          'admin': 'admin',
+          '管理员': 'admin',
+          'branch': 'branch',
+          '分店': 'branch',
+          'receptionist': 'receptionist',
+          '前台': 'receptionist',
+          'purchasing': 'purchasing',
+          '采购': 'purchasing',
+          '采购员': 'purchasing',
+          '采购主管': 'purchasing'
+        };
+
+        for (const row of rawJson) {
+          if (!Array.isArray(row) || row.length === 0) continue;
+
+          const col0 = String(row[0] || '').trim();
+          if (!headerSkipped && (col0.includes('账号') || col0.includes('必填') || col0.includes('名称') || col0.includes('Username'))) {
+            headerSkipped = true;
+            continue;
+          }
+
+          const usernameVal = String(row[0] || '').trim();
+          const roleStr = String(row[1] || '').trim();
+          const branchVal = String(row[2] || '').trim();
+          const pinVal = String(row[3] || '').trim();
+          const statusVal = String(row[4] || '').trim();
+
+          if (!usernameVal) continue;
+
+          // Resolve role
+          let mappedRole: Role = 'branch';
+          if (roleStr) {
+            mappedRole = roleMap[roleStr.toLowerCase()] || roleMap[roleStr] || 'branch';
+          }
+
+          const isActiveVal = statusVal === '否' ? false : true;
+
+          // Check for errors on this row
+          let error = '';
+          if (mappedRole === 'branch' && !branchVal) {
+            error = '分店账号必须在【关联分店名称】注明该分店具体名字！';
+          }
+
+          parsedUsers.push({
+            username: usernameVal,
+            role: mappedRole,
+            branchName: mappedRole === 'branch' ? branchVal : undefined,
+            pin: pinVal || '123456',
+            isActive: isActiveVal,
+            error: error || undefined
+          });
+        }
+
+        if (parsedUsers.length === 0) {
+          alert('未能识别到任何有效的账号行数据！请确认识别表头位置没有乱。');
+          return;
+        }
+
+        setImportUsersPreview(parsedUsers);
+        alert(`成功解析出 ${parsedUsers.length} 个账户录入项！请在下方核算预览无误后，点击[确认批量导入]提交至服务器。`);
+      } catch (err: any) {
+        console.error(err);
+        alert('读取解析 Excel 失败，请确保格式正确：' + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleConfirmImportUsers = async () => {
+    if (importUsersPreview.length === 0) return;
+    const hasErrors = importUsersPreview.some(p => p.error);
+    if (hasErrors) {
+      const confirmForce = window.confirm('预览中存在标记为异常的账户行（例如缺少分店名称）。是否忽略有问题行，继续导入其他正常的账户？');
+      if (!confirmForce) return;
+    }
+
+    const validItems = importUsersPreview.filter(p => !p.error);
+    if (validItems.length === 0) {
+      alert('无可导入的合法账户记录！');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const result = await DbService.importUsers(validItems, {
+        id: currentUser.id,
+        name: currentUser.username,
+        role: currentUser.role
+      }, importOverwrite);
+
+      alert(`🎉 恭喜！批量账号导入任务执行成功：\n- 录入全新账号：${result.imported} 个\n- 覆盖已有账号：${result.updated} 个\n- 跳过重名账密：${result.skipped} 个`);
+      setImportUsersPreview([]);
+      setShowImportUserPanel(false);
+    } catch (e: any) {
+      console.error(e);
+      alert('批量提交失败：' + e.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -522,6 +723,177 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                 />
               </div>
             </div>
+
+            {/* Account Multi-Tool Operations (Excel Import/Export & Template Download) */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 shadow-3xs">
+              <div className="flex items-center gap-1.5 text-slate-700 text-xs font-bold">
+                <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-600" />
+                <span>表格导入导出工具箱</span>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={downloadAccountTemplate}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 hover:border-slate-350 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-3xs"
+                  title="获取格式正确的 Excel 账号字段导入模板，避免列错位"
+                >
+                  <Download className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                  下载空白账号模板.xlsx
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowImportUserPanel(!showImportUserPanel);
+                    setImportUsersPreview([]);
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-1xs ${
+                    showImportUserPanel ? 'bg-amber-600 hover:bg-amber-750 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {showImportUserPanel ? '收起导入模块' : 'Excel/CSV 批量导账号'}
+                </button>
+                <button
+                  type="button"
+                  onClick={exportCurrentAccounts}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-650 hover:bg-emerald-700 bg-emerald-600 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-1xs"
+                  title="导出全系统现有成员账密备份"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  备份当前全厂账号表.xlsx
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Importer Panel for Accounts */}
+            {showImportUserPanel && (
+              <div className="p-4 md:p-5 border border-slate-200/80 rounded-xl bg-slate-50 space-y-4 animate-fadeIn">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 bg-white border border-slate-150 p-4 rounded-xl shadow-3xs">
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-black text-slate-800">第一步：下载 / 准备您的账号批导 Excel 文件</h4>
+                    <p className="text-[10px] text-slate-500 leading-normal">
+                      建议直接使用右侧提供的官方标准模版，包含：<strong>账号名称、权限身份、关联分店名称、登录密码PIN码、是否启用</strong> 5 列。
+                    </p>
+                    <p className="text-[10px] text-indigo-500 leading-normal font-semibold">
+                      💡 角色名称支持模糊识别：分店也可以写“branch”，管理员也可以写“admin”，前台写“receptionist”，采购写“purchasing”。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={downloadAccountTemplate}
+                    className="shrink-0 flex items-center gap-1.2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[11px] font-bold border border-blue-200 cursor-pointer self-start sm:self-auto"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    下载空白模版文件
+                  </button>
+                </div>
+
+                {/* Dropzone File Selector */}
+                <div className="p-6 bg-white border border-dashed border-blue-300 rounded-xl flex flex-col items-center justify-center gap-3 text-center transition-all hover:bg-blue-50/10">
+                  <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 shadow-3xs">
+                    <Upload className="w-5 h-5 animate-bounce" />
+                  </div>
+                  <div className="space-y-1">
+                    <h5 className="text-xs font-bold text-slate-800">第二步：选中您编辑妥当的账户工作表 (.xlsx, .xls, .csv)</h5>
+                    <p className="text-[10px] text-slate-400">系统已经部署完毕 XLSX 解析引擎，瞬间读取上百个分店账号并且智能分析重名排重。</p>
+                  </div>
+                  <label className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer inline-block">
+                    选择并解析本地 Excel 表格
+                    <input
+                      type="file"
+                      id="upload_accounts_xlsx"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleImportUsersFile}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {/* Overwrite or skip configuration select */}
+                {importUsersPreview.length > 0 && (
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-4 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-1.5">
+                        <AlertCircle className="w-4.5 h-4.5 text-indigo-500 animate-pulse" />
+                        <h5 className="text-xs font-extrabold text-slate-800">第三步：账户核验预览 (共识别出 {importUsersPreview.length} 项)</h5>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500 font-bold">若全系统已存在同名账户时：</span>
+                        <select
+                          value={importOverwrite ? 'true' : 'false'}
+                          onChange={e => setImportOverwrite(e.target.value === 'true')}
+                          className="text-[11px] font-bold text-slate-700 border border-slate-200 rounded px-2.5 py-1 bg-slate-50 outline-none"
+                        >
+                          <option value="true">🔄 覆盖密码与角色(推荐)</option>
+                          <option value="false">⏭️ 跳过不用更改</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Quick Preview Table with detailed statuses */}
+                    <div className="max-h-60 overflow-y-auto border border-slate-150 rounded-lg">
+                      <table className="w-full text-left text-[11px] border-collapse">
+                        <thead className="bg-slate-50 text-slate-600 font-bold sticky top-0 border-b border-slate-150">
+                          <tr>
+                            <th className="p-2.5">账号名称</th>
+                            <th className="p-2.5">权限身份</th>
+                            <th className="p-2.5">关联分店</th>
+                            <th className="p-2.5">登录PIN码</th>
+                            <th className="p-2.5">状态</th>
+                            <th className="p-2.5 text-right">检查结果</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {importUsersPreview.map((item, idx) => {
+                            const matchedExist = users.find(u => u.username.toLowerCase() === item.username.toLowerCase());
+                            return (
+                              <tr key={idx} className={`hover:bg-slate-50/50 ${item.error ? 'bg-rose-50/40' : matchedExist ? 'bg-amber-55/20 bg-amber-50/30' : ''}`}>
+                                <td className="p-2.5 font-bold text-slate-800">{item.username}</td>
+                                <td className="p-2.5 font-semibold text-slate-700">
+                                  {item.role === 'admin' ? '⚙️ 管理员' :
+                                   item.role === 'branch' ? '🏠 分店' :
+                                   item.role === 'receptionist' ? '💁 前台' : '💼 采购'}
+                                </td>
+                                <td className="p-2.5 text-slate-550 font-medium text-slate-500">{item.branchName || '—'}</td>
+                                <td className="p-2.5 font-mono font-bold text-indigo-700">{item.pin}</td>
+                                <td className="p-2.5 font-semibold">{item.isActive ? '🟢 启用' : '🔴 禁用'}</td>
+                                <td className="p-2.5 text-right font-bold text-[10px]">
+                                  {item.error ? (
+                                    <span className="text-rose-600">❌ {item.error}</span>
+                                  ) : matchedExist ? (
+                                    <span className="text-amber-600">⚠️ 已存在 (将覆盖)</span>
+                                  ) : (
+                                    <span className="text-emerald-600">✅ 正常(全新)</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setImportUsersPreview([])}
+                        className="px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-bold text-slate-500 cursor-pointer"
+                      >
+                        清空此预览
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmImportUsers}
+                        className="px-5 py-2 bg-indigo-600 hover:bg-indigo-705 bg-indigo-600 text-white rounded-lg text-xs font-black shadow-md hover:shadow-lg transition-all cursor-pointer"
+                      >
+                        ⚡ 确认批量导入录入到系统 ({importUsersPreview.filter(p => !p.error).length} 项)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Table representation */}
             <div className="overflow-x-auto border border-slate-50 rounded-lg">

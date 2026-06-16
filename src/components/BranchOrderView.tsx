@@ -715,6 +715,34 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
     alert(`成功从粘贴文本中识别录入 ${parsedCount} 款订货项目！已悉数加载合并到下方表格中，商品库不存在的项已自动标记为“非常规新品”。`);
   };
 
+  const downloadOrderTemplate = () => {
+    try {
+      const data = [
+        ["商品编码", "商品名称", "规格型号", "订货数量", "首选供应商/厂家", "单行详细备注 / 定制需求说明"],
+        ["PROD-A01", "九牧不锈钢暗装高档水龙头", "SS-901-HM", 15, "九牧卫浴制造厂", "一楼男洗手间损坏更换"],
+        ["PROD-B05", "飞利浦智能LED吸顶灯 50W", "PL-M50W-LED", 25, "飞利浦合肥照明厂", "二层前厅天花板吊顶替换"],
+        ["NEW-TEM-88", "合金防盗特种防爆挂锁", "LT-88MM-HIGH-SECURITY", 5, "温州特种锁厂", "⚠️非标新品：材质需要全钢，钥匙配4把"]
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      
+      ws['!cols'] = [
+        { wch: 20 },
+        { wch: 32 },
+        { wch: 26 },
+        { wch: 12 },
+        { wch: 28 },
+        { wch: 48 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "分店批量订货提报表");
+      XLSX.writeFile(wb, "分店批量订货提报标准模板.xlsx");
+    } catch (e: any) {
+      alert("下载订单模板失败：" + e.message);
+    }
+  };
+
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1224,7 +1252,15 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                   </p>
                 </div>
                 
-                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={downloadOrderTemplate}
+                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 rounded text-[10px] font-bold transition-colors cursor-pointer border border-emerald-200"
+                    title="下载格式完全对接系统的标准微软 Excel 提货模版"
+                  >
+                    📥 下载标准 Excel 模板.xlsx
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1259,7 +1295,7 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                   <div className="text-left">
                     <h5 className="text-xs font-bold text-slate-800">读取本地 Excel 工作簿或 CSV 文本表格 (.xlsx, .csv)</h5>
                     <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">
-                      表头规范为：[商品编码, 商品名称, 规格型号, 数量] 作为前4列，系统自适应识别新品标记。
+                      表列排序为：<strong>[第一列：商品编码]、[第二列：商品名称]、[第三列：规格型号]、[第四列：订货数量]</strong>。推荐直接点选上方【下载标准 Excel 模板】。
                     </p>
                   </div>
                 </div>

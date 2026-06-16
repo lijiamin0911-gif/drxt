@@ -602,6 +602,71 @@ export class DbService {
     this.triggerChange();
   }
 
+  public static async importUsers(items: { username: string; role: Role; branchName?: string; pin: string; isActive?: boolean }[], operator: { id: string; name: string; role: string }, overwrite: boolean): Promise<{ imported: number; updated: number; skipped: number }> {
+    const existing = await this.getUsers();
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    const finalUsers = [...existing];
+
+    for (const newItem of items) {
+      if (!newItem.username || !newItem.username.trim()) continue;
+      const matchIdx = finalUsers.findIndex(e => e.username.toLowerCase() === newItem.username.trim().toLowerCase());
+      if (matchIdx > -1) {
+        if (overwrite) {
+          finalUsers[matchIdx] = {
+            ...finalUsers[matchIdx],
+            role: newItem.role,
+            branchName: newItem.role === 'branch' ? newItem.branchName : undefined,
+            pin: newItem.pin || finalUsers[matchIdx].pin,
+            isActive: newItem.isActive !== undefined ? newItem.isActive : true,
+          };
+          updated++;
+        } else {
+          skipped++;
+        }
+      } else {
+        const createdUser: User = {
+          id: 'u_' + Date.now() + Math.random().toString(36).substring(2, 6) + '_' + Math.floor(Math.random() * 100),
+          username: newItem.username.trim(),
+          role: newItem.role,
+          branchName: newItem.role === 'branch' ? newItem.branchName : undefined,
+          pin: newItem.pin || '123456', // default pin
+          isActive: newItem.isActive !== undefined ? newItem.isActive : true,
+          createdAt: new Date().toISOString()
+        };
+        finalUsers.push(createdUser);
+        imported++;
+      }
+    }
+
+    // Save back to db (Firestore or localStorage)
+    if (isFirebaseConfigured && db) {
+      try {
+        for (const u of finalUsers) {
+          await setDoc(doc(db, 'users', u.id), u);
+        }
+      } catch (e) {
+        handleFirestoreError(e, OperationType.WRITE, 'users_bulk');
+      }
+    } else {
+      setLocalData('db_users', finalUsers);
+    }
+
+    this.cachedUsers = finalUsers;
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '导入用户表',
+      `批量导入账户：新增 ${imported} 个账户，覆盖 ${updated} 个账户，跳过 ${skipped} 个账户`
+    );
+    this.triggerChange();
+    return { imported, updated, skipped };
+  }
+
   // --- Orders CRUD ---
   public static async getOrders(): Promise<Order[]> {
     if (this.cachedOrders !== null) {
