@@ -277,6 +277,16 @@ export class DbService {
   private static listeners: (() => void)[] = [];
   private static isListeningRealTime = false;
 
+  // Static Cache variables for instant rendering and optimistic updates
+  private static cachedUsers: User[] | null = null;
+  private static cachedOrders: Order[] | null = null;
+  private static cachedPurchaseOrders: PurchaseOrder[] | null = null;
+  private static cachedLogs: OperationLog[] | null = null;
+  private static cachedConfig: SystemConfig | null = null;
+  private static cachedInventory: InventoryItem[] | null = null;
+  private static cachedProducts: Product[] | null = null;
+  private static cachedSuppliers: Supplier[] | null = null;
+
   // Register state change listeners
   public static onChange(callback: () => void) {
     this.listeners.push(callback);
@@ -337,7 +347,26 @@ export class DbService {
           this.isListeningRealTime = true;
           const collectionsToWatch = ['users', 'orders', 'purchase_orders', 'logs', 'configs', 'inventory', 'products', 'suppliers'];
           collectionsToWatch.forEach(colName => {
-            onSnapshot(collection(db, colName), () => {
+            onSnapshot(collection(db, colName), (snap) => {
+              const data = snap.docs.map(doc => doc.data());
+              if (colName === 'users') {
+                this.cachedUsers = data as User[];
+              } else if (colName === 'orders') {
+                this.cachedOrders = data as Order[];
+              } else if (colName === 'purchase_orders') {
+                this.cachedPurchaseOrders = data as PurchaseOrder[];
+              } else if (colName === 'logs') {
+                this.cachedLogs = data as OperationLog[];
+              } else if (colName === 'configs') {
+                const globalDoc = data.find(d => d.id === 'global');
+                this.cachedConfig = globalDoc as SystemConfig || null;
+              } else if (colName === 'inventory') {
+                this.cachedInventory = data as InventoryItem[];
+              } else if (colName === 'products') {
+                this.cachedProducts = data as Product[];
+              } else if (colName === 'suppliers') {
+                this.cachedSuppliers = data as Supplier[];
+              }
               this.triggerChange();
             }, (err) => {
               console.warn(`Snapshot subscription failed for ${colName}:`, err);
@@ -419,6 +448,12 @@ export class DbService {
       timestamp: new Date().toISOString()
     };
 
+    if (this.cachedLogs) {
+      this.cachedLogs.unshift(logItem);
+    } else {
+      this.cachedLogs = [logItem];
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'logs', logItem.id), logItem);
@@ -434,10 +469,16 @@ export class DbService {
   }
 
   public static async getLogs(): Promise<OperationLog[]> {
+    if (this.cachedLogs !== null) {
+      return [...this.cachedLogs].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDocs(query(collection(db, 'logs'), orderBy('timestamp', 'desc')));
-        return snap.docs.map(doc => doc.data() as OperationLog);
+        this.cachedLogs = snap.docs.map(doc => doc.data() as OperationLog);
+        return this.cachedLogs;
       } catch (e) {
         handleFirestoreError(e, OperationType.LIST, 'logs');
       }
@@ -449,11 +490,15 @@ export class DbService {
 
   // Config management
   public static async getConfig(): Promise<SystemConfig> {
+    if (this.cachedConfig !== null) {
+      return this.cachedConfig;
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDoc(doc(db, 'configs', 'global'));
         if (snap.exists()) {
-          return snap.data() as SystemConfig;
+          this.cachedConfig = snap.data() as SystemConfig;
+          return this.cachedConfig;
         }
       } catch (e) {
         handleFirestoreError(e, OperationType.GET, 'configs/global');
@@ -475,6 +520,8 @@ export class DbService {
       updatedBy: operatorName
     };
 
+    this.cachedConfig = configData;
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'configs', 'global'), configData);
@@ -490,10 +537,14 @@ export class DbService {
 
   // --- Users CRUD ---
   public static async getUsers(): Promise<User[]> {
+    if (this.cachedUsers !== null) {
+      return this.cachedUsers;
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDocs(collection(db, 'users'));
-        return snap.docs.map(doc => doc.data() as User);
+        this.cachedUsers = snap.docs.map(doc => doc.data() as User);
+        return this.cachedUsers;
       } catch (e) {
         handleFirestoreError(e, OperationType.LIST, 'users');
       }
@@ -502,6 +553,15 @@ export class DbService {
   }
 
   public static async saveUser(user: User, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedUsers) {
+      const index = this.cachedUsers.findIndex(u => u.id === user.id);
+      if (index > -1) {
+        this.cachedUsers[index] = user;
+      } else {
+        this.cachedUsers.push(user);
+      }
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'users', user.id), user);
@@ -523,6 +583,10 @@ export class DbService {
   }
 
   public static async deleteUser(userId: string, username: string, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedUsers) {
+      this.cachedUsers = this.cachedUsers.filter(u => u.id !== userId);
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await deleteDoc(doc(db, 'users', userId));
@@ -540,10 +604,14 @@ export class DbService {
 
   // --- Orders CRUD ---
   public static async getOrders(): Promise<Order[]> {
+    if (this.cachedOrders !== null) {
+      return this.cachedOrders;
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDocs(collection(db, 'orders'));
-        return snap.docs.map(doc => doc.data() as Order);
+        this.cachedOrders = snap.docs.map(doc => doc.data() as Order);
+        return this.cachedOrders;
       } catch (e) {
         handleFirestoreError(e, OperationType.LIST, 'orders');
       }
@@ -552,6 +620,15 @@ export class DbService {
   }
 
   public static async saveOrder(order: Order, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedOrders) {
+      const index = this.cachedOrders.findIndex(o => o.id === order.id);
+      if (index > -1) {
+        this.cachedOrders[index] = order;
+      } else {
+        this.cachedOrders.push(order);
+      }
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'orders', order.id), order);
@@ -681,10 +758,14 @@ export class DbService {
 
   // --- Purchase Orders (PO) CRUD ---
   public static async getPurchaseOrders(): Promise<PurchaseOrder[]> {
+    if (this.cachedPurchaseOrders !== null) {
+      return this.cachedPurchaseOrders;
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDocs(collection(db, 'purchase_orders'));
-        return snap.docs.map(doc => doc.data() as PurchaseOrder);
+        this.cachedPurchaseOrders = snap.docs.map(doc => doc.data() as PurchaseOrder);
+        return this.cachedPurchaseOrders;
       } catch (e) {
         handleFirestoreError(e, OperationType.LIST, 'purchase_orders');
       }
@@ -728,6 +809,10 @@ export class DbService {
         factoryStatus: 'unconfirmed',
         createdAt: new Date().toISOString()
       };
+
+      if (this.cachedPurchaseOrders) {
+        this.cachedPurchaseOrders.push(newPo);
+      }
 
       // Write PO
       if (isFirebaseConfigured && db) {
@@ -1047,10 +1132,14 @@ export class DbService {
 
   // --- Inventory Management ---
   public static async getInventory(): Promise<InventoryItem[]> {
+    if (this.cachedInventory !== null) {
+      return this.cachedInventory;
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDocs(collection(db, 'inventory'));
-        return snap.docs.map(doc => doc.data() as InventoryItem);
+        this.cachedInventory = snap.docs.map(doc => doc.data() as InventoryItem);
+        return this.cachedInventory;
       } catch (e) {
         handleFirestoreError(e, OperationType.LIST, 'inventory');
       }
@@ -1059,6 +1148,15 @@ export class DbService {
   }
 
   public static async saveInventoryItem(item: InventoryItem, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedInventory) {
+      const index = this.cachedInventory.findIndex(i => i.id === item.id || i.productCode === item.productCode);
+      if (index > -1) {
+        this.cachedInventory[index] = { ...this.cachedInventory[index], ...item };
+      } else {
+        this.cachedInventory.push(item);
+      }
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'inventory', item.id), item);
@@ -1385,10 +1483,14 @@ export class DbService {
 
   // --- Products CRUD ---
   public static async getProducts(): Promise<Product[]> {
+    if (this.cachedProducts !== null) {
+      return this.cachedProducts;
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDocs(collection(db, 'products'));
-        return snap.docs.map(doc => doc.data() as Product);
+        this.cachedProducts = snap.docs.map(doc => doc.data() as Product);
+        return this.cachedProducts;
       } catch (e) {
         handleFirestoreError(e, OperationType.LIST, 'products');
       }
@@ -1397,6 +1499,15 @@ export class DbService {
   }
 
   public static async saveProduct(product: Product, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedProducts) {
+      const idx = this.cachedProducts.findIndex(p => p.id === product.id);
+      if (idx > -1) {
+        this.cachedProducts[idx] = { ...this.cachedProducts[idx], ...product };
+      } else {
+        this.cachedProducts.push(product);
+      }
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'products', product.id), product);
@@ -1479,10 +1590,14 @@ export class DbService {
 
   // --- Suppliers CRUD ---
   public static async getSuppliers(): Promise<Supplier[]> {
+    if (this.cachedSuppliers !== null) {
+      return this.cachedSuppliers;
+    }
     if (isFirebaseConfigured && db) {
       try {
         const snap = await getDocs(collection(db, 'suppliers'));
-        return snap.docs.map(doc => doc.data() as Supplier);
+        this.cachedSuppliers = snap.docs.map(doc => doc.data() as Supplier);
+        return this.cachedSuppliers;
       } catch (e) {
         handleFirestoreError(e, OperationType.LIST, 'suppliers');
       }
@@ -1491,6 +1606,15 @@ export class DbService {
   }
 
   public static async saveSupplier(supplier: Supplier, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedSuppliers) {
+      const idx = this.cachedSuppliers.findIndex(s => s.id === supplier.id);
+      if (idx > -1) {
+        this.cachedSuppliers[idx] = { ...this.cachedSuppliers[idx], ...supplier };
+      } else {
+        this.cachedSuppliers.push(supplier);
+      }
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'suppliers', supplier.id), supplier);
@@ -1511,6 +1635,10 @@ export class DbService {
   }
 
   public static async deleteSupplier(supplierId: string, supplierName: string, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedSuppliers) {
+      this.cachedSuppliers = this.cachedSuppliers.filter(s => s.id !== supplierId);
+    }
+
     if (isFirebaseConfigured && db) {
       try {
         await deleteDoc(doc(db, 'suppliers', supplierId));

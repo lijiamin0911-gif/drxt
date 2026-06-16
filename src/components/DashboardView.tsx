@@ -284,26 +284,26 @@ export default function DashboardView({ orders, systemConfig, onConfigChange, cu
     };
   }).sort((a, b) => b.totalQty - a.totalQty); 
 
-  // Compute metrics per staff (merchandiser, branch personnel, receptionist)
-  const staffsList = Array.from(new Set([
-    ...users.map(u => u.username).filter(Boolean),
-    ...orders.map(o => o.merchandiserName).filter(Boolean),
-    ...logs.map(l => l.username).filter(Boolean),
-  ])).filter(name => name !== 'admin' && name !== '管理员' && name !== '主管' && name !== 'System' && name !== 'system');
-
-  const staffStats = staffsList.map(name => {
-    const assigned = orders.filter(o => o.merchandiserName === name);
-    const userLogs = logs.filter(l => l.username === name);
-    return {
-      name,
-      assignedCount: assigned.length,
-      assignedPending: assigned.filter(o => o.status === 'purchased').length,
-      assignedCompleted: assigned.filter(o => o.status === 'completed').length,
-      logCount: userLogs.length,
-      lastActive: userLogs[0]?.timestamp || null,
-      lastAction: userLogs[0]?.action || '暂无近期操作',
-    };
-  }).sort((a, b) => b.logCount - a.logCount);
+   // Compute metrics per staff (merchandiser, branch personnel, receptionist)
+   const staffsList = Array.from(new Set([
+     ...users.map(u => u.username).filter(Boolean),
+     ...orders.flatMap(o => o.merchandiserName ? o.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean) : []).filter(Boolean),
+     ...logs.map(l => l.username).filter(Boolean),
+   ])).filter(name => name !== 'admin' && name !== '管理员' && name !== '主管' && name !== 'System' && name !== 'system');
+ 
+   const staffStats = staffsList.map(name => {
+     const assigned = orders.filter(o => o.merchandiserName && o.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean).includes(name));
+     const userLogs = logs.filter(l => l.username === name);
+     return {
+       name,
+       assignedCount: assigned.length,
+       assignedPending: assigned.filter(o => o.status === 'purchased').length,
+       assignedCompleted: assigned.filter(o => o.status === 'completed').length,
+       logCount: userLogs.length,
+       lastActive: userLogs[0]?.timestamp || null,
+       lastAction: userLogs[0]?.action || '暂无近期操作',
+     };
+   }).sort((a, b) => b.logCount - a.logCount);
 
   const handleUpdateConfig = async (e: React.FormEvent) => {
     e.preventDefault();

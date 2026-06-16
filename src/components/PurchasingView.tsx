@@ -236,7 +236,7 @@ export default function PurchasingView({
   const filteredPendingItems = pendingPurchaseItems.filter(o => {
     if (selectedMerchandiserFilter === 'all') return true;
     if (selectedMerchandiserFilter === 'unassigned') return !o.merchandiserName;
-    return o.merchandiserName === selectedMerchandiserFilter;
+    return o.merchandiserName && o.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean).includes(selectedMerchandiserFilter);
   });
 
   // Supplier grouping for selection visual
@@ -661,8 +661,8 @@ export default function PurchasingView({
               >
                 <option value="all">📁 显示全部跟单 (共 {pendingPurchaseItems.length} 件)</option>
                 <option value="unassigned">🚨 暂无指派采购跟单 ({pendingPurchaseItems.filter(o => !o.merchandiserName).length} 件)</option>
-                {Array.from(new Set(procurementStaff.map(u => u.username))).map(name => {
-                  const count = pendingPurchaseItems.filter(o => o.merchandiserName === name).length;
+                {Array.from(new Set(procurementStaff.map(u => u.username))).map((name: string) => {
+                  const count = pendingPurchaseItems.filter(o => o.merchandiserName && o.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean).includes(name)).length;
                   return (
                     <option key={name} value={name}>
                       👤 仅看 {name} 的跟进件 ({count} 件)

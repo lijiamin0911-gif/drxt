@@ -34,6 +34,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
   const [supplierContact, setSupplierContact] = useState('');
   const [supplierPhone, setSupplierPhone] = useState('');
   const [supplierMerchandiser, setSupplierMerchandiser] = useState('');
+  const [selectedMerchandisers, setSelectedMerchandisers] = useState<string[]>([]);
+  const [customMerchandiserInput, setCustomMerchandiserInput] = useState('');
   const [supplierLeadTime, setSupplierLeadTime] = useState('');
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [isSubmittingSupplier, setIsSubmittingSupplier] = useState(false);
@@ -193,6 +195,15 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
     }
   };
 
+  const handleAddMerchandiser = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!selectedMerchandisers.includes(trimmed)) {
+      setSelectedMerchandisers(prev => [...prev, trimmed]);
+    }
+    setCustomMerchandiserInput('');
+  };
+
   const handleSaveSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierName.trim()) {
@@ -201,6 +212,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
     }
 
     setIsSubmittingSupplier(true);
+    const joinedMerchandisers = selectedMerchandisers.join(', ');
     const updatedModel: Supplier = {
       id: editingSupplier ? editingSupplier.id : ('sup_' + Date.now() + Math.random().toString(36).substring(2, 6)),
       name: supplierName.trim(),
@@ -209,7 +221,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       isActive: editingSupplier ? editingSupplier.isActive : true,
       createdAt: editingSupplier ? editingSupplier.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      merchandiserName: supplierMerchandiser.trim() || undefined,
+      merchandiserName: joinedMerchandisers.trim() || undefined,
       leadTimeText: supplierLeadTime.trim() || undefined
     };
 
@@ -220,6 +232,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       setSupplierContact('');
       setSupplierPhone('');
       setSupplierMerchandiser('');
+      setSelectedMerchandisers([]);
+      setCustomMerchandiserInput('');
       setSupplierLeadTime('');
       setEditingSupplier(null);
       loadSuppliersList();
@@ -629,6 +643,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                     setSupplierContact('');
                     setSupplierPhone('');
                     setSupplierMerchandiser('');
+                    setSelectedMerchandisers([]);
+                    setCustomMerchandiserInput('');
                     setSupplierLeadTime('');
                   }} 
                   className="text-xs text-slate-400 hover:text-slate-600 font-bold cursor-pointer"
@@ -674,33 +690,90 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                 </div>
               </div>
 
-              <div className="space-y-1 bg-indigo-50/40 p-3 rounded-lg border border-indigo-100">
-                <label className="block text-xs font-bold text-indigo-900 flex items-center gap-1">
-                  <span>👤 绑定本司采购专属跟单员</span>
+              <div className="space-y-2 bg-indigo-50/40 p-3 rounded-lg border border-indigo-100">
+                <label className="block text-xs font-bold text-indigo-900 flex items-center justify-between">
+                  <span>👤 绑定本司采购专属跟单员 (可多选/手打)</span>
+                  {selectedMerchandisers.length > 0 && (
+                    <span className="text-[10px] text-indigo-500 font-bold font-mono">已指派 {selectedMerchandisers.length} 人</span>
+                  )}
                 </label>
                 <p className="text-[10px] text-indigo-600 mb-1.5 leading-relaxed font-semibold">分店提报该厂货品时，自动分配到此跟单采购账号。</p>
-                <div className="space-y-1.5">
-                  <select
-                    value={supplierMerchandiser}
-                    onChange={e => setSupplierMerchandiser(e.target.value)}
-                    className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg outline-none text-slate-800 focus:ring-1 focus:ring-indigo-500 font-bold"
-                  >
-                    <option value="">-- 手动录入 或 快捷指派采购账户 --</option>
-                    {users
-                      .filter(u => u.role === 'purchasing' || u.role === 'admin')
-                      .map(u => (
-                        <option key={u.id} value={u.username}>
-                          {u.username} ({u.role === 'purchasing' ? '采购部人员' : '超级管理员'})
-                        </option>
+                
+                <div className="space-y-2">
+                  {/* Current Selected Tags */}
+                  {selectedMerchandisers.length > 0 ? (
+                    <div className="flex flex-wrap gap-1 p-1.5 bg-white border border-slate-200 rounded-lg min-h-[34px]">
+                      {selectedMerchandisers.map(name => (
+                        <div key={name} className="flex items-center gap-1 bg-indigo-50 text-indigo-700 text-[10px] md:text-xs font-bold px-2 py-0.5 rounded-full border border-indigo-100">
+                          <span>{name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMerchandisers(prev => prev.filter(n => n !== name))}
+                            className="hover:text-indigo-900 text-slate-400 hover:bg-slate-200/50 rounded-full w-3.5 h-3.5 flex items-center justify-center font-extrabold focus:outline-none ml-0.5 cursor-pointer select-none"
+                            title="移除此人"
+                          >
+                            ×
+                          </button>
+                        </div>
                       ))}
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="若名单内没有，可直接在此处手打输入跟单姓名"
-                    value={supplierMerchandiser}
-                    onChange={e => setSupplierMerchandiser(e.target.value)}
-                    className="w-full text-xs p-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-indigo-500 text-slate-800 font-semibold placeholder-slate-400"
-                  />
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-slate-400 italic p-1.5 bg-slate-50 border border-slate-200 border-dashed rounded-lg text-center select-none font-medium">
+                      暂无指派采购员 (默认留空)
+                    </div>
+                  )}
+
+                  {/* Input and add button */}
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="手打输入跟单姓名，点右侧[添加]或回车"
+                      value={customMerchandiserInput}
+                      onChange={e => setCustomMerchandiserInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (customMerchandiserInput.trim()) {
+                            handleAddMerchandiser(customMerchandiserInput);
+                          }
+                        }
+                      }}
+                      className="flex-1 text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-800 font-semibold placeholder-slate-400 outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (customMerchandiserInput.trim()) {
+                          handleAddMerchandiser(customMerchandiserInput);
+                        }
+                      }}
+                      className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center shadow-3xs"
+                    >
+                      添加
+                    </button>
+                  </div>
+
+                  {/* Quick select dropdown */}
+                  <div className="space-y-1">
+                    <select
+                      value=""
+                      onChange={e => {
+                        if (e.target.value) {
+                          handleAddMerchandiser(e.target.value);
+                        }
+                      }}
+                      className="w-full text-xs px-2 py-1 bg-white border border-slate-300 rounded-lg outline-none text-slate-600 focus:ring-1 focus:ring-indigo-500 font-semibold"
+                    >
+                      <option value="">💡 快捷点选已有账户 (不需滚动寻找)</option>
+                      {users
+                        .filter(u => u.role === 'purchasing' || u.role === 'admin')
+                        .map(u => (
+                          <option key={u.id} value={u.username} disabled={selectedMerchandisers.includes(u.username)}>
+                            {u.username} ({u.role === 'purchasing' ? '采购部' : '主管'}) {selectedMerchandisers.includes(u.username) ? ' (已加)' : ''}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -793,6 +866,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                             setSupplierContact(sup.contact || '');
                             setSupplierPhone(sup.phone || '');
                             setSupplierMerchandiser(sup.merchandiserName || '');
+                            setSelectedMerchandisers(sup.merchandiserName ? sup.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean) : []);
                             setSupplierLeadTime(sup.leadTimeText || '');
                           }}
                           className="p-1 hover:bg-indigo-100 text-indigo-600 rounded bg-indigo-50 md:opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-bold"

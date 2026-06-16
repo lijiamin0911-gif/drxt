@@ -1082,10 +1082,13 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
           
           // Look up supplier merchandiserName in suppliers
           const matchedSup = suppliers.find(s => s.name.trim() === item.supplier.trim());
+          if (!matchedSup || !matchedSup.merchandiserName) return false;
+          const assignedNames = matchedSup.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean);
+
           if (selectedMerchandiserFilterForCheck === 'me') {
-            return matchedSup && matchedSup.merchandiserName === currentUser.username;
+            return assignedNames.includes(currentUser.username);
           }
-          return matchedSup && matchedSup.merchandiserName === selectedMerchandiserFilterForCheck;
+          return assignedNames.includes(selectedMerchandiserFilterForCheck);
         });
 
         return (
@@ -1122,10 +1125,12 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
                   >
                     <option value="all">📁 查看全部供应商缺货行 (共 {lowStockItems.length} 件)</option>
                     <option value="me">👤 仅看我直接跟管的厂家品项 (跟单: {currentUser.username})</option>
-                    {Array.from(new Set(suppliers.map(s => s.merchandiserName).filter(Boolean))).map(name => {
+                    {Array.from(new Set(suppliers.flatMap(s => s.merchandiserName ? s.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean) : []))).map(name => {
                       const count = lowStockItems.filter(item => {
                         const sObj = suppliers.find(su => su.name.trim() === item.supplier.trim());
-                        return sObj && sObj.merchandiserName === name;
+                        if (!sObj || !sObj.merchandiserName) return false;
+                        const assignedNames = sObj.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()).filter(Boolean);
+                        return assignedNames.includes(name);
                       }).length;
                       return (
                         <option key={name} value={name}>

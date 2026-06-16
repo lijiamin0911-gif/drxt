@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   LogOut, 
   Key, 
@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DbService } from './lib/dbService';
-import { User, Order, PurchaseOrder, SystemConfig, OperationLog } from './types';
+import { User, Order, PurchaseOrder, SystemConfig, OperationLog, InventoryItem } from './types';
 
 // Importing Views
 import DashboardView from './components/DashboardView';
@@ -61,6 +61,23 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
 
+  // Real-time notification toast queue
+  const [toasts, setToasts] = useState<{ id: string; text: string; type: 'success' | 'info' | 'warning' | 'error'; duration?: number }[]>([]);
+  
+  const addToast = (text: string, type: 'success' | 'info' | 'warning' | 'error' = 'info', duration = 6000) => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    setToasts(prev => [...prev, { id, text, type, duration }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, duration);
+  };
+
+  // Comparative references for state change auditing (real-time notification processing)
+  const prevOrdersRef = useRef<Order[]>([]);
+  const prevPurchaseOrdersRef = useRef<PurchaseOrder[]>([]);
+  const prevInventoryRef = useRef<InventoryItem[]>([]);
+  const isFirstLoadRef = useRef(true);
+
   // Load and subscribe to DB Changes
   useEffect(() => {
     let unsubscribe: () => void;
@@ -69,12 +86,13 @@ export default function App() {
       setIsLoading(true);
       try {
         await DbService.initialize();
-        const [u, o, po, lg, cfg] = await Promise.all([
+        const [u, o, po, lg, cfg, inv] = await Promise.all([
           DbService.getUsers(),
           DbService.getOrders(),
           DbService.getPurchaseOrders(),
           DbService.getLogs(),
-          DbService.getConfig()
+          DbService.getConfig(),
+          DbService.getInventory()
         ]);
         setUsers(u);
         setOrders(o);
@@ -82,15 +100,160 @@ export default function App() {
         setLogs(lg);
         setSystemConfig(cfg);
 
+        // Seed comparative registries to block first-load toast flood
+        prevOrdersRef.current = o;
+        prevPurchaseOrdersRef.current = po;
+        prevInventoryRef.current = inv;
+        isFirstLoadRef.current = false;
+
         // Bind real-time change listener
         unsubscribe = DbService.onChange(async () => {
-          const [u2, o2, po2, lg2, cfg2] = await Promise.all([
+          const [u2, o2, po2, lg2, cfg2, inv2] = await Promise.all([
             DbService.getUsers(),
             DbService.getOrders(),
             DbService.getPurchaseOrders(),
             DbService.getLogs(),
-            DbService.getConfig()
+            DbService.getConfig(),
+            DbService.getInventory()
           ]);
+
+          // Compare logic to generate gorgeous role-specific live Toast Notifications
+          const localUser = JSON.parse(sessionStorage.getItem('current_user') || 'null') || currentUser;
+          
+          if (!isFirstLoadRef.current && localUser) {
+            const currentRole = localUser.role;
+            const currentUserId = localUser.id;
+
+            // 1. Check for New Orders (Created)
+            o2.forEach(newOrder => {
+              const oldMatch = prevOrdersRef.current.find(o => o.id === newOrder.id);
+              if (!oldMatch) {
+                if (currentRole === 'admin' || currentRole === 'receptionist') {
+                  addToast(
+                    `🔔 实时新提报：【${newOrder.branchName}】新增了货品订单\n商品：${newOrder.productName} (${newOrder.specs}) x ${newOrder.quantity} 件\n状态：待前台确认`,
+                    'info'
+                  );
+                } else if (currentRole === 'branch' && newOrder.branchId === currentUserId) {
+                  addToast(
+                    `📝 本店提报成功！订单已进入待确认状态 [编号: ${newOrder.orderNo}]`,
+                    'success'
+                  );
+                }
+              } else {
+                // 2. Check for Order modifications (Status changes or prices)
+                if (oldMatch.status !== newOrder.status) {
+                  const statusLabels: Record<string, string> = {
+                    'pending_confirm': '待前台确认',
+                    'pending_purchase': '待汇总采购',
+                    'purchased': '已采购待到货',
+                    'completed': '已完成(已入库)',
+                    'cancelled': '已取消',
+                    'rejected': '被驳回'
+                  };
+                  const oldLabel = statusLabels[oldMatch.status] || oldMatch.status;
+                  const newLabel = statusLabels[newOrder.status] || newOrder.status;
+
+                  if (currentRole === 'admin' || currentRole === 'receptionist' || currentRole === 'purchasing') {
+                    addToast(
+                      `🔄 【状态变更】订单 [${newOrder.orderNo}]\n商品: ${newOrder.productName} x ${newOrder.quantity}\n分店: ${newOrder.branchName}\n变更为：[${newLabel}]`,
+                      'success'
+                    );
+                  } else if (currentRole === 'branch' && newOrder.branchId === currentUserId) {
+                    addToast(
+                      `📦 【本店订单状态已变更】您提报的 ${newOrder.productName} x ${newOrder.quantity}\n当前最新状态变更为：【${newLabel}】`,
+                      newOrder.status === 'rejected' ? 'error' : 'success'
+                    );
+                  }
+                }
+
+                // Check for Price Updates (Auditing/reception price updates)
+                if ((oldMatch.currentPrice !== newOrder.currentPrice) || (oldMatch.previousPrice !== newOrder.previousPrice)) {
+                  if (currentRole === 'admin' || (currentRole === 'branch' && newOrder.branchId === currentUserId)) {
+                    addToast(
+                      `💰 【核算价变动】订单 [${newOrder.orderNo}]\n货品: ${newOrder.productName}\n核算单价变更为：¥${newOrder.currentPrice || 0} / 件`,
+                      'success'
+                    );
+                  }
+                }
+              }
+            });
+
+            // 3. New / Modified Purchase Orders (POs)
+            po2.forEach(newPo => {
+              const oldMatch = prevPurchaseOrdersRef.current.find(po => po.id === newPo.id);
+              if (!oldMatch) {
+                if (currentRole === 'admin' || currentRole === 'purchasing') {
+                  addToast(
+                    `📦 【新增采购订货单】[${newPo.poNo}]\n供应商：${newPo.supplier}\n计划汇总订购货品数量：${newPo.totalQuantity} 件`,
+                    'warning'
+                  );
+                } else if (currentRole === 'branch') {
+                  // Find if any of our orders were included in this PO
+                  const ourOrdersInPo = o2.filter(o => o.branchId === currentUserId && newPo.orderIds.includes(o.id));
+                  if (ourOrdersInPo.length > 0) {
+                    addToast(
+                      `✈️ 【采购发运中】您的 ${ourOrdersInPo.length} 项货品已汇总到采购单 [${newPo.poNo}]，由供应商 [${newPo.supplier}] 进行备货发运！`,
+                      'info'
+                    );
+                  }
+                }
+              } else {
+                if (oldMatch.factoryStatus !== newPo.factoryStatus) {
+                  const label = newPo.factoryStatus === 'confirmed' ? '厂家已确认接收' : '未接收';
+                  if (currentRole === 'admin' || currentRole === 'purchasing') {
+                    addToast(
+                      `🏭 【厂家来信】采购单 [${newPo.poNo}] 厂家接单状态已更新：${label}`,
+                      'warning'
+                    );
+                  }
+                }
+                if (oldMatch.expectedArrivalDate !== newPo.expectedArrivalDate && newPo.expectedArrivalDate) {
+                  if (currentRole === 'admin' || currentRole === 'purchasing' || currentRole === 'receptionist') {
+                    addToast(
+                      `🗓️ 【预计提货日更新】采购单 [${newPo.poNo}]\n供应商：${newPo.supplier}\n交付排产日期：${newPo.expectedArrivalDate}`,
+                      'warning'
+                    );
+                  }
+                }
+                if (oldMatch.status !== newPo.status) {
+                  const poLabels: Record<string, string> = {
+                    'pending_arrival': '发运中/待收货',
+                    'completed': '全额到货',
+                    'cancelled': '已取消'
+                  };
+                  const statusLabel = poLabels[newPo.status] || newPo.status;
+                  if (currentRole === 'admin' || currentRole === 'purchasing' || currentRole === 'receptionist') {
+                    addToast(
+                      `📦 【采购单交付状态变动】采购单 [${newPo.poNo}]\n最新状态：【${statusLabel}】`,
+                      'success'
+                    );
+                  }
+                }
+              }
+            });
+
+            // 4. Inventory Stock updates (Deduction and replenishment)
+            inv2.forEach(newInv => {
+              const oldMatch = prevInventoryRef.current.find(i => i.productCode === newInv.productCode);
+              if (oldMatch && oldMatch.currentStock !== newInv.currentStock) {
+                const diff = newInv.currentStock - oldMatch.currentStock;
+                const changeDetail = diff > 0 ? `入库上架增加 ${diff} 件` : `出库扣减 ${Math.abs(diff)} 件`;
+                
+                if (currentRole === 'admin' || currentRole === 'purchasing' || currentRole === 'receptionist') {
+                  addToast(
+                    `📦 【库存精细变动】货品：[${newInv.productName}] \n变动动作：${changeDetail}\n当前库内现存：${newInv.currentStock} 件`,
+                    diff > 0 ? 'success' : 'info'
+                  );
+                }
+              }
+            });
+          }
+
+          // Save current snapshots for future comparisons
+          prevOrdersRef.current = o2;
+          prevPurchaseOrdersRef.current = po2;
+          prevInventoryRef.current = inv2;
+
           setUsers(u2);
           setOrders(o2);
           setPurchaseOrders(po2);
@@ -110,7 +273,7 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [currentUser]);
 
   // Set default tab based on logged role
   useEffect(() => {
@@ -708,6 +871,43 @@ export default function App() {
       <footer className="bg-white border-t border-slate-150 py-3 px-4 text-center text-[10px] text-slate-400 font-sans shrink-0">
         多分店订单协同管理系统 © 2026. Designed with Inter & JetBrains Mono display typography. All rights reserved.
       </footer>
+
+      {/* Real-time Toast Notifications Container (Interactive Role-scoped Alerts) */}
+      <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: -20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9, y: -10 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className={`pointer-events-auto p-4 rounded-xl shadow-xl border flex items-start gap-3 bg-white/95 backdrop-blur-sm ${
+                toast.type === 'success' ? 'border-emerald-200 bg-emerald-50/95 text-emerald-900 shadow-emerald-100/50' :
+                toast.type === 'warning' ? 'border-amber-200 bg-amber-50/95 text-amber-900 shadow-amber-100/50' :
+                toast.type === 'error' ? 'border-rose-200 bg-rose-50/95 text-rose-900 shadow-rose-100/50' :
+                'border-blue-200 bg-blue-50/95 text-blue-900 shadow-blue-105/50'
+              }`}
+            >
+              <div className="text-base select-none shrink-0 mt-0.5">
+                {toast.type === 'success' ? '⚡' :
+                 toast.type === 'warning' ? '📦' :
+                 toast.type === 'error' ? '⚠️' : '🔔'}
+              </div>
+              <div className="flex-1 text-xs font-semibold whitespace-pre-line leading-relaxed font-sans">
+                {toast.text}
+              </div>
+              <button
+                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer transition-colors pointer-events-auto text-xs font-bold shrink-0 self-start select-none pl-1"
+                aria-label="Close Notification"
+              >
+                ✕
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
     </div>
   );
