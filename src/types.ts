@@ -26,6 +26,8 @@ export interface Order {
   purchaseOrderId?: string; // linked PO
   createdAt: string;
   confirmedAt?: string;
+  previousPrice?: number; // 上次价格
+  currentPrice?: number;  // 本次价格
   orderType?: 'conventional' | 'custom'; // convencional or custom (常规/新品非常规)
   remark?: string; // forced remark for custom novelty items
   remarkRole?: 'branch' | 'receptionist' | 'purchasing' | 'admin';

@@ -52,52 +52,10 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 const SEED_USERS: User[] = [
   {
     id: 'u_admin',
-    username: '超级管理员',
+    username: 'admin',
     role: 'admin',
     isActive: true,
     pin: '1111',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_vice_admin',
-    username: '系统副管理员',
-    role: 'admin',
-    isActive: true,
-    pin: '1112',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_branch_east',
-    username: '城东分店',
-    role: 'branch',
-    branchName: '城东分店',
-    isActive: true,
-    pin: '2222',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_branch_west',
-    username: '城西分店',
-    role: 'branch',
-    branchName: '城西分店',
-    isActive: true,
-    pin: '3333',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_reception',
-    username: '前台汇总员',
-    role: 'receptionist',
-    isActive: true,
-    pin: '4444',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_purchasing',
-    username: '采购主管',
-    role: 'purchasing',
-    isActive: true,
-    pin: '5555',
     createdAt: new Date().toISOString()
   }
 ];
@@ -317,6 +275,7 @@ export function formatDateToMinute(dateStr?: string | Date): string {
 export class DbService {
   // Listeners list
   private static listeners: (() => void)[] = [];
+  private static isListeningRealTime = false;
 
   // Register state change listeners
   public static onChange(callback: () => void) {
@@ -371,6 +330,19 @@ export class DbService {
           for (const item of SEED_SUPPLIERS) {
             await setDoc(doc(db, 'suppliers', item.id), item);
           }
+        }
+
+        // Subscribe to real-time changes
+        if (isFirebaseConfigured && db && !this.isListeningRealTime) {
+          this.isListeningRealTime = true;
+          const collectionsToWatch = ['users', 'orders', 'purchase_orders', 'logs', 'configs', 'inventory', 'products', 'suppliers'];
+          collectionsToWatch.forEach(colName => {
+            onSnapshot(collection(db, colName), () => {
+              this.triggerChange();
+            }, (err) => {
+              console.warn(`Snapshot subscription failed for ${colName}:`, err);
+            });
+          });
         }
       } catch (e) {
         console.error('Firebase Seed Init Failed (using local fallback)', e);
@@ -795,7 +767,7 @@ export class DbService {
     supplier: string,
     orderDate: string,
     remarks: string,
-    items: { productCode: string; productName: string; specs: string; quantity: number }[],
+    items: { productCode: string; productName: string; specs: string; quantity: number; previousPrice?: number; currentPrice?: number }[],
     operator: { id: string; name: string; role: string }
   ): Promise<void> {
     const rawDate = orderDate || new Date().toISOString().slice(0, 10);
@@ -826,6 +798,8 @@ export class DbService {
         status: 'purchased',
         supplier: supplier.trim(),
         purchaseOrderId: poId,
+        previousPrice: item.previousPrice,
+        currentPrice: item.currentPrice,
         createdAt: `${rawDate} ${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`,
         orderType: 'conventional'
       };
@@ -1665,6 +1639,40 @@ export class DbService {
       operator.role,
       approved ? '审核同意厂家直发' : '硬驳回并拒绝直发',
       `采购跟单员 [${operator.name}] 审核了特殊件 [${order.productName}] 的厂家直发：【${approved ? '同意厂家直发' : '拒绝：改库房派送'}】`
+    );
+
+    this.triggerChange();
+  }
+
+  public static async updateOrderPrices(
+    orderId: string,
+    previousPrice: number,
+    currentPrice: number,
+    operator: { id: string; name: string; role: string }
+  ): Promise<void> {
+    if (isFirebaseConfigured && db) {
+      try {
+        const orderRef = doc(db, 'orders', orderId);
+        await updateDoc(orderRef, { previousPrice, currentPrice });
+      } catch (e) {
+        handleFirestoreError(e, OperationType.UPDATE, `orders/${orderId}`);
+      }
+    } else {
+      const orders = getLocalData<Order[]>('db_orders', []);
+      const idx = orders.findIndex(o => o.id === orderId);
+      if (idx > -1) {
+        orders[idx].previousPrice = previousPrice;
+        orders[idx].currentPrice = currentPrice;
+        setLocalData('db_orders', orders);
+      }
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '更新货品价格数据',
+      `采购员更新了货项编号订单ID [${orderId}] 的价格体系：上次价格 ¥${previousPrice} -> 本次价格 ¥${currentPrice}`
     );
 
     this.triggerChange();

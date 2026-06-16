@@ -1233,9 +1233,9 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                       );
                     }}
                     className="px-2 py-1 bg-blue-50 hover:bg-blue-100/80 text-blue-700 hover:text-blue-800 rounded text-[10px] font-bold transition-colors cursor-pointer border border-blue-200/40"
-                    title="自动载入供测试的高质量示例串"
+                    title="自动载入高质量快速补货示例串"
                   >
-                    📋 填入测试范例
+                    📋 导入标准范例
                   </button>
                   <button
                     type="button"

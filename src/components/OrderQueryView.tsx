@@ -115,11 +115,15 @@ export default function OrderQueryView({ orders, currentUser }: OrderQueryViewPr
   // Filter orders by chosen date suffix (compares YYYY-MM-DD prefix of createdAt)
   const matchingOrders = React.useMemo(() => {
     return orders.filter(o => {
+      // If branch user, restrict to their own branch
+      if (currentUser.role === 'branch' && o.branchId !== currentUser.id) {
+        return false;
+      }
       // o.createdAt is formatted as YYYY-MM-DD HH:mm
       const minuteTimeStr = formatDateToMinute(o.createdAt);
       return minuteTimeStr.startsWith(selectedDate);
     });
-  }, [orders, selectedDate]);
+  }, [orders, selectedDate, currentUser]);
 
   // Map matching results for proper export attributes matching table columns
   const exportData = React.useMemo(() => {

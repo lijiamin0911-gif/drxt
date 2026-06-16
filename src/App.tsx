@@ -157,75 +157,32 @@ export default function App() {
     }
   }, [users, currentUser, bypassKickout]);
 
-  // 计算调试栏简易切换按钮的代表子集（例如：前2个管理员[主/副]、前2个分店、前1个前台、前1个采购），避免100+账号堆积冲毁排版
-  const debugUsers = React.useMemo(() => {
-    const subset: User[] = [];
-    const roleCounts: { [role: string]: number } = {};
-    for (const u of users) {
-      const currentCount = roleCounts[u.role] || 0;
-      let shouldAdd = false;
-      if (u.role === 'admin' && currentCount < 2) shouldAdd = true;
-      else if (u.role === 'branch' && currentCount < 2) shouldAdd = true;
-      else if (u.role === 'receptionist' && currentCount < 1) shouldAdd = true;
-      else if (u.role === 'purchasing' && currentCount < 1) shouldAdd = true;
+  // Load and subscribe to DB Changes
 
-      if (shouldAdd) {
-        subset.push(u);
-        roleCounts[u.role] = currentCount + 1;
-      }
+  const getMatchedUser = (typed: string) => {
+    const search = typed.trim();
+    let matched = users.find(u => u.username.trim() === search);
+    if (!matched && search.toLowerCase() === 'admin') {
+      matched = users.find(u => u.id === 'u_admin');
     }
-    return subset;
-  }, [users]);
-
-  const handleInstantLogin = async (user: User) => {
-    if (!user.isActive) {
-      alert('此账户已被管理员禁用，请联系管理员激活');
-      return;
-    }
-
-    const sessionToken = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-    sessionStorage.setItem('current_session_token', sessionToken);
-    localStorage.setItem(`session_token_${user.id}`, sessionToken);
-
-    const updatedUser: User = {
-      ...user,
-      sessionToken
-    };
-
-    try {
-      await DbService.saveUser(updatedUser, { id: user.id, name: user.username, role: user.role });
-    } catch (err) {
-      console.error('更新会话Token失败', err);
-    }
-
-    setCurrentUser(updatedUser);
-    setPinInput('');
-    setUsernameInput('');
-
-    DbService.log(
-      user.id,
-      user.username,
-      user.role,
-      '一键免密登录',
-      `演示人员通过便捷通道一键免密进入系统：${user.username} (${user.role})，已注册单点单会话保护`
-    );
+    return matched;
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!usernameInput.trim()) {
-      alert('请输入管理员分配的系统账号');
+      alert('请输入您的系统登录账号');
       return;
     }
 
-    const matched = users.find(u => u.username.trim() === usernameInput.trim());
+    const matched = getMatchedUser(usernameInput);
     if (!matched) {
-      alert('系统未登记此登录账号，请使用管理员分配或创建的账号');
+      alert('系统未登记此登录账号，请更换或联系管理员分配');
       return;
     }
 
     if (!matched.isActive) {
-      alert('此账户已被管理员禁用，请联系管理员激活');
+      alert('此账户已被系统管理员禁用，请联系管理员激活');
       return;
     }
 
@@ -239,13 +196,16 @@ export default function App() {
       sessionStorage.setItem('current_session_token', sessionToken);
       localStorage.setItem(`session_token_${matched.id}`, sessionToken);
 
+      // If logging in as admin and existing database record username isn't 'admin' yet, normalize it
+      const finalUsername = matched.id === 'u_admin' ? 'admin' : matched.username;
       const updatedUser: User = {
         ...matched,
+        username: finalUsername,
         sessionToken
       };
 
       try {
-        await DbService.saveUser(updatedUser, { id: matched.id, name: matched.username, role: matched.role });
+        await DbService.saveUser(updatedUser, { id: matched.id, name: finalUsername, role: matched.role });
       } catch (err) {
         console.error('更新会话Token失败', err);
       }
@@ -257,13 +217,13 @@ export default function App() {
       // Log login success
       DbService.log(
         matched.id,
-        matched.username,
+        finalUsername,
         matched.role,
         '自主登录',
-        `账号 [${matched.username}] 分配角色 [${matched.role}] 验证成功且单人安全会话锁定，自主动态进入系统`
+        `账号 [${finalUsername}] 验证成功且单人安全会话锁定，登录进入协同视角`
       );
     } else {
-      alert('安全验证失效：安全 PIN 错误，请重新输入');
+      alert('安全验证失败：验证 PIN 码不匹配，请重新输入');
       setPinInput('');
     }
   };
@@ -279,33 +239,6 @@ export default function App() {
       );
       setCurrentUser(null);
     }
-  };
-
-  // Switch role on the fly for reviewer debugging convenience
-  const handleQuickSwitchUser = async (user: User) => {
-    const sessionToken = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-    sessionStorage.setItem('current_session_token', sessionToken);
-    localStorage.setItem(`session_token_${user.id}`, sessionToken);
-
-    const updatedUser: User = {
-      ...user,
-      sessionToken
-    };
-
-    try {
-      await DbService.saveUser(updatedUser, { id: user.id, name: user.username, role: user.role });
-    } catch (err) {
-      console.error(err);
-    }
-
-    setCurrentUser(updatedUser);
-    DbService.log(
-      user.id,
-      user.username,
-      user.role,
-      '快速角色切换',
-      `评审员通过快捷调试栏切换至：${user.username} (${user.role})，并生成测试安全单点会话`
-    );
   };
 
   // Wrapper DB actions
@@ -377,8 +310,6 @@ export default function App() {
 
   // LOGIN PORTAL PAGE
   if (!currentUser) {
-    const matchedUser = users.find(u => u.username.trim() === usernameInput.trim());
-
     return (
       <div id="login_portal_wrapper" className="min-h-screen bg-gradient-to-tr from-slate-50 via-slate-100/80 to-blue-50/40 flex items-center justify-center p-4 md:p-8 font-sans select-none relative overflow-hidden">
         {/* 背景轻量科技光晕 */}
@@ -405,8 +336,8 @@ export default function App() {
               多分店订单协同管理系统
             </h1>
             
-            <p className="text-xs text-slate-505 text-slate-500 max-w-sm mx-auto leading-relaxed">
-              请输入管理员分配的分店、前台汇总或采购身份账号，系统将自动识别对应权限并开启专属协同视窗
+            <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+              请输入系统分配的账号，验证后将开启专属供应链协同视窗
             </p>
           </div>
 
@@ -429,37 +360,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 权限识别微标 */}
-            <AnimatePresence mode="wait">
-              {usernameInput.trim() !== '' && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0, y: -5 }}
-                  animate={{ opacity: 1, height: 'auto', y: 0 }}
-                  exit={{ opacity: 0, height: 0, y: -5 }}
-                  transition={{ duration: 0.2 }}
-                  className="overflow-hidden"
-                >
-                  {matchedUser ? (
-                    <div className="flex items-start gap-2 p-2.5 bg-emerald-50/70 border border-emerald-100 rounded-xl text-emerald-805 text-emerald-800 text-xs text-left">
-                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="font-bold block">【角色确认】{matchedUser.role === 'admin' ? (matchedUser.username.includes('副') ? '副系统管理员' : '主系统管理员') : matchedUser.role === 'branch' ? `分店业务员 (${matchedUser.branchName || matchedUser.username})` : matchedUser.role === 'receptionist' ? '前台汇总确认审批员' : '采购部管理主管'}</span>
-                        <span className="text-[10px] text-emerald-600 leading-none">身份验证已锁定，请输入测试验证 PIN 码</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-start gap-2 p-2.5 bg-amber-50/70 border border-amber-100 rounded-xl text-amber-805 text-amber-800 text-xs text-left">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="font-bold block">未匹配到此系统账户</span>
-                        <span className="text-[10px] text-amber-600">请输入已有管理员账户，或点击下方【查看预设测试指南】</span>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             {/* PIN码输入框 */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 tracking-wide flex items-center gap-1.5">
@@ -467,14 +367,14 @@ export default function App() {
                 安全 PIN 验证码
               </label>
               <div className="relative">
-                <Key className="absolute left-3.5 top-2.5 w-4.5 h-4.5 text-slate-405 text-slate-400" />
+                <Key className="absolute left-3.5 top-2.5 w-4.5 h-4.5 text-slate-400" />
                 <input
                   type="password"
                   maxLength={10}
                   placeholder="请输入您的安全 PIN 验证码"
                   value={pinInput}
                   onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
-                  className="w-full pl-10 pr-3 py-2 border border-slate-205 border-slate-200 bg-white rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-600 text-sm duration-150 text-slate-800 placeholder:font-sans"
+                  className="w-full pl-10 pr-3 py-2 border border-slate-200 bg-white rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-600 text-sm duration-150 text-slate-800 placeholder:font-sans"
                 />
               </div>
             </div>
@@ -484,161 +384,11 @@ export default function App() {
               type="submit"
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
-              className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold rounded-xl text-xs shadow-md shadow-blue-500/10 hover:shadow-blue-500/20 duration-150 flex items-center justify-center gap-1.5 cursor-pointer leading-none mt-2 animate-pulse"
+              className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold rounded-xl text-xs shadow-md shadow-blue-500/10 hover:shadow-blue-500/20 duration-150 flex items-center justify-center gap-1.5 cursor-pointer leading-none mt-2 shrink-0"
             >
               验证并安全登录系统 <ArrowRight className="w-3.5 h-3.5" />
             </motion.button>
           </form>
-
-          {/* ⚖️ 超管免挤退并发通道控制 */}
-          <div className="bg-gradient-to-br from-blue-50/70 to-indigo-50/60 border border-blue-100 rounded-xl p-3 space-y-1 text-xs shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-750 text-slate-800 flex items-center gap-1">
-                🛡️ 超管授权：多页面页签免密并存
-              </span>
-              <label className="relative inline-flex items-center cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={bypassKickout}
-                  onChange={(e) => handleToggleBypass(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-9 h-5 bg-slate-250 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-650 peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
-            <p className="text-[10px] text-slate-500 leading-normal">
-              {bypassKickout ? (
-                <span className="text-emerald-700 font-semibold">
-                  已由超管授信开启（推荐）：允许多款浏览器或跨终端并存同一个角色账号（绝不强制下线对方），便于多角色视图比对评审。
-                </span>
-              ) : (
-                <span className="text-amber-700 font-medium">
-                  已启用严格商业单点安全锁：同账号再次登录将抢占会话，前一次会话自动安全踢下线。
-                </span>
-              )}
-            </p>
-          </div>
-
-          {/* ⚡ 演示专属：常用角色一键秒登通道 */}
-          <div className="space-y-2 pt-1">
-            <div className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
-              <span>⚡ 演示/评审专属一键免密闪登：</span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {[
-                { id: 'u_admin', username: '超级管理员', role: 'admin', label: '👑 系统主管' },
-                { id: 'u_reception', username: '前台汇总员', role: 'receptionist', label: '🎨 前台汇总' },
-                { id: 'u_purchasing', username: '采购主管', role: 'purchasing', label: '🏭 采购主管' },
-                { id: 'u_branch_east', username: '城东分店', role: 'branch', label: '🏪 城东分店' }
-              ].map(item => {
-                const fullUser = users.find(u => u.id === item.id) || {
-                  id: item.id,
-                  username: item.username,
-                  role: item.role as any,
-                  isActive: true,
-                  pin: item.id === 'u_admin' ? '1111' : item.id === 'u_reception' ? '4444' : item.id === 'u_purchasing' ? '5555' : '2222',
-                  createdAt: ''
-                };
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleInstantLogin(fullUser)}
-                    className="py-1.5 px-2 bg-slate-50 border border-slate-200 hover:border-blue-500 hover:bg-blue-50/30 rounded-lg text-[10px] font-bold text-slate-700 duration-150 transition-all flex items-center justify-between cursor-pointer active:scale-95 text-left"
-                    title={`一键免密闪登【${item.username}】身份`}
-                  >
-                    <span className="truncate">{item.label}</span>
-                    <ArrowRight className="w-2.5 h-2.5 text-slate-400 shrink-0 ml-1" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 预设账号与PIN提示（Collapsible Accordion） */}
-          <div className="border border-slate-100 rounded-xl bg-slate-50/50 p-2.5">
-            <button
-              type="button"
-              onClick={() => setShowAccountsGuide(!showAccountsGuide)}
-              className="w-full flex items-center justify-between text-[11px] font-bold text-slate-600 cursor-pointer"
-            >
-              <span className="flex items-center gap-1 inline-flex">
-                <Sparkles className="w-3 h-3 text-blue-500" />
-                查看管理员分配的预设测试账号与 PIN 码
-              </span>
-              <ChevronRight className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showAccountsGuide ? 'rotate-90' : ''}`} />
-            </button>
-            
-            <AnimatePresence>
-              {showAccountsGuide && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden mt-2 pt-2 border-t border-slate-200/60 text-left"
-                >
-                  <p className="text-[10px] text-slate-500 leading-normal mb-2">
-                    系统已为您预置以下演示用账户，无需输入。**直接点击以下任意账户卡片**即可实现免密一键闪电登录：
-                  </p>
-
-                  {/* 快捷检索条 */}
-                  <div className="relative mb-2">
-                    <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="按账号、分店或角色过滤清单..."
-                      value={guideSearchQuery}
-                      onChange={e => setGuideSearchQuery(e.target.value)}
-                      className="w-full pl-7 pr-3 py-1 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-1.5 text-left max-h-52 overflow-y-auto pr-1 scrollbar-thin">
-                    {users
-                      .filter(u => {
-                        if (!guideSearchQuery.trim()) return true;
-                        const queryLower = guideSearchQuery.toLowerCase();
-                        return (
-                          u.username.toLowerCase().includes(queryLower) ||
-                          u.role.toLowerCase().includes(queryLower) ||
-                          (u.branchName && u.branchName.toLowerCase().includes(queryLower))
-                        );
-                      })
-                      .map((u) => (
-                        <div 
-                          key={u.id} 
-                          onClick={() => handleInstantLogin(u)}
-                          className="flex items-center justify-between p-1.5 bg-white border border-slate-100/80 rounded-lg text-[10px] hover:border-blue-600 hover:bg-blue-50/50 cursor-pointer transition-all active:scale-[0.99] border-l-2 hover:border-l-blue-600"
-                          title="点击此预设卡片，一键为您免密安全登录此角色身份"
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-extrabold text-slate-800">{u.username}</span>
-                            <span className="text-[9px] text-slate-400 px-1 bg-slate-50 border border-slate-100/50 rounded leading-none shrink-0">
-                              {u.role === 'admin' ? (u.username.includes('副') ? '副管理员' : '主管理员') : u.role === 'branch' ? `分店 (${u.branchName || '业务'})` : u.role === 'receptionist' ? '前台汇总' : '采购主管'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 border border-emerald-150 px-1.5 py-0.5 rounded leading-none">⚡ 闪电一键登录</span>
-                          </div>
-                        </div>
-                      ))}
-                    {users.filter(u => {
-                      if (!guideSearchQuery.trim()) return true;
-                      const queryLower = guideSearchQuery.toLowerCase();
-                      return (
-                        u.username.toLowerCase().includes(queryLower) ||
-                        u.role.toLowerCase().includes(queryLower) ||
-                        (u.branchName && u.branchName.toLowerCase().includes(queryLower))
-                      );
-                    }).length === 0 && (
-                      <p className="text-[10px] text-slate-400 text-center py-4">无匹配的相关账户</p>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
 
           <div className="text-center text-[10px] text-slate-400 pt-1 border-t border-slate-100 flex items-center justify-center gap-1 italic">
             <Globe className="w-3 h-3 text-slate-300" />
@@ -667,32 +417,7 @@ export default function App() {
             </h1>
           </div>
 
-          {/* Quick-Switch Reviewer Debugger (High Craftsman) */}
-          <div className="flex flex-wrap items-center gap-2 text-[11px] font-sans">
-            <span className="text-slate-400 font-medium hidden lg:inline">调试快捷切换:</span>
-            <div className="flex flex-wrap gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
-              {debugUsers.map(u => (
-                <button
-                  key={u.id}
-                  onClick={() => handleQuickSwitchUser(u)}
-                  className={`px-2 py-0.5 rounded font-medium transition-colors cursor-pointer ${
-                    currentUser.id === u.id
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-500 hover:bg-slate-150'
-                  }`}
-                  title={`快速切换角色身份：${u.username}`}
-                >
-                  {u.role === 'admin' && (u.username.includes('副') ? '副管' : '主管')}
-                  {u.role === 'branch' && (u.branchName || u.username).substring(0, 4)}
-                  {u.role === 'receptionist' && '前台'}
-                  {u.role === 'purchasing' && '采购'}
-                </button>
-              ))}
-            </div>
-
-            {/* Current log state */}
-            <div className="h-4 w-px bg-slate-200 hidden sm:inline"></div>
-
+          <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1 rounded-lg">
               <div className="flex flex-col text-left">
                 <span className="font-bold text-slate-900 leading-none">{currentUser.username}</span>
@@ -753,7 +478,7 @@ export default function App() {
                 }`}
               >
                 <Building className="w-3.5 h-3.5" />
-                <span>分店提单模拟区</span>
+                <span>分店采购提单</span>
               </button>
 
               <button
@@ -763,7 +488,7 @@ export default function App() {
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>前台审批模拟区</span>
+                <span>前台审批汇总</span>
               </button>
 
               <button

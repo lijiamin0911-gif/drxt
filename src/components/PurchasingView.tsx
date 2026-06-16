@@ -44,6 +44,7 @@ export default function PurchasingView({
   currentUser 
 }: PurchasingViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'generate' | 'manage' | 'direct' | 'cancelled'>('generate');
+  const [showPrices, setShowPrices] = useState(false);
   
   // Load suppliers and approved products for manual creator
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -91,8 +92,8 @@ export default function PurchasingView({
   const [directSupplier, setDirectSupplier] = useState('');
   const [directOrderDate, setDirectOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [directRemarks, setDirectRemarks] = useState('采购自主建单(库存储备备货)');
-  const [directItems, setDirectItems] = useState<{ productCode: string; productName: string; specs: string; quantity: number }[]>([
-    { productCode: '', productName: '', specs: '', quantity: 1 }
+  const [directItems, setDirectItems] = useState<{ productCode: string; productName: string; specs: string; quantity: number; previousPrice?: number; currentPrice?: number }[]>([
+    { productCode: '', productName: '', specs: '', quantity: 1, previousPrice: undefined, currentPrice: undefined }
   ]);
   const [isSubmittingDirect, setIsSubmittingDirect] = useState(false);
 
@@ -104,7 +105,9 @@ export default function PurchasingView({
         productCode: matched.productCode,
         productName: matched.productName,
         specs: matched.specs,
-        quantity: updated[idx].quantity
+        quantity: updated[idx].quantity,
+        previousPrice: updated[idx].previousPrice,
+        currentPrice: updated[idx].currentPrice
       };
       // If no supplier selected yet, auto-select product's default supplier
       if (!directSupplier && matched.defaultSupplier) {
@@ -115,7 +118,9 @@ export default function PurchasingView({
         productCode: '',
         productName: '',
         specs: '',
-        quantity: updated[idx].quantity
+        quantity: updated[idx].quantity,
+        previousPrice: undefined,
+        currentPrice: undefined
       };
     }
     setDirectItems(updated);
@@ -131,7 +136,7 @@ export default function PurchasingView({
   };
 
   const handleAddDirectItemRow = () => {
-    setDirectItems([...directItems, { productCode: '', productName: '', specs: '', quantity: 1 }]);
+    setDirectItems([...directItems, { productCode: '', productName: '', specs: '', quantity: 1, previousPrice: undefined, currentPrice: undefined }]);
   };
 
   const handleRemoveDirectItemRow = (idx: number) => {
@@ -166,7 +171,7 @@ export default function PurchasingView({
       // Reset form
       setDirectSupplier('');
       setDirectRemarks('采购自主建单(库存储备备货)');
-      setDirectItems([{ productCode: '', productName: '', specs: '', quantity: 1 }]);
+      setDirectItems([{ productCode: '', productName: '', specs: '', quantity: 1, previousPrice: undefined, currentPrice: undefined }]);
       setActiveSubTab('manage'); // automatically switch to contract control page
     } catch (err) {
       console.error(err);
@@ -639,6 +644,16 @@ export default function PurchasingView({
               <span className="text-[10px] text-slate-400 block">各采购只跟进自己名下归属供应商的订单，可在此快速切换。（支持一键调单）。</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-slate-700 bg-white border border-slate-250 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-50 cursor-pointer select-none shadow-2xs">
+                <input
+                  type="checkbox"
+                  checked={showPrices}
+                  onChange={e => setShowPrices(e.target.checked)}
+                  className="rounded text-blue-600 cursor-pointer focus:ring-1 focus:ring-blue-500 w-3.5 h-3.5"
+                />
+                <span>💰 启用价格对比 (上次价格与本次价格)</span>
+              </label>
+
               <select
                 value={selectedMerchandiserFilter}
                 onChange={e => setSelectedMerchandiserFilter(e.target.value)}
@@ -852,6 +867,12 @@ export default function PurchasingView({
                               <th className="py-1.5 text-center bg-blue-50/30 text-blue-900 border-x border-slate-100">分店订单量</th>
                               <th className="py-1.5 text-center bg-amber-50/50 text-amber-900">📦 仓库库存确认 & 补货加注</th>
                               <th className="py-1.5 text-center bg-indigo-50 text-indigo-950 font-extrabold border-x border-slate-100">最终一键投产量</th>
+                              {showPrices && (
+                                <>
+                                  <th className="py-1.5 text-center bg-teal-50 text-teal-950 font-extrabold border-r border-slate-100 w-24">上次价格 (¥)</th>
+                                  <th className="py-1.5 text-center bg-rose-50 text-rose-950 font-extrabold border-r border-slate-100 w-24">本次价格 (¥)</th>
+                                </>
+                              )}
                               <th className="py-1.5 text-center">指派跟单 (可一键调单)</th>
                               <th className="py-1.5 border-r border-slate-100">预约提单日期</th>
                               <th className="py-1.5 text-center w-16">单挑管理</th>
@@ -1045,6 +1066,39 @@ export default function PurchasingView({
                                       = {finalTotalQty} 件
                                     </strong>
                                   </td>
+
+                                  {showPrices && (
+                                    <>
+                                      <td className="py-2.5 text-center bg-teal-50/20 px-1 border-r border-slate-100" onClick={e => e.stopPropagation()}>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={order.previousPrice !== undefined ? order.previousPrice : ''}
+                                          onChange={async (e) => {
+                                            const prevVal = parseFloat(e.target.value) || 0;
+                                            await DbService.updateOrderPrices(order.id, prevVal, order.currentPrice || 0, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
+                                          }}
+                                          placeholder="上次价 ¥"
+                                          className="w-18 px-1 py-0.5 border border-teal-300 rounded text-center text-xs text-teal-800 font-bold bg-white focus:outline-none focus:ring-1 focus:ring-teal-500 font-mono"
+                                        />
+                                      </td>
+                                      <td className="py-2.5 text-center bg-rose-50/20 px-1 border-r border-slate-100" onClick={e => e.stopPropagation()}>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={order.currentPrice !== undefined ? order.currentPrice : ''}
+                                          onChange={async (e) => {
+                                            const currVal = parseFloat(e.target.value) || 0;
+                                            await DbService.updateOrderPrices(order.id, order.previousPrice || 0, currVal, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
+                                          }}
+                                          placeholder="本次价 ¥"
+                                          className="w-18 px-1 py-0.5 border border-rose-300 rounded text-center text-xs text-rose-800 font-bold bg-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono"
+                                        />
+                                      </td>
+                                    </>
+                                  )}
 
                                   {/* Merchandiser scheduler */}
                                   <td className="py-2.5 text-center" onClick={e => e.stopPropagation()}>
@@ -1256,6 +1310,12 @@ export default function PurchasingView({
                                 <th className="p-2 w-1/4">开订分店</th>
                                 <th className="p-2 w-1/3">商品款项</th>
                                 <th className="p-2 font-mono text-center w-20">预采购量</th>
+                                {showPrices && (
+                                  <>
+                                    <th className="p-2 font-semibold text-teal-800 text-center w-22 bg-teal-50/50">上次单价</th>
+                                    <th className="p-2 font-semibold text-rose-800 text-center w-22 bg-rose-50/50">本次单价</th>
+                                  </>
+                                )}
                                 <th className="p-2 font-mono text-center w-20">已收数量</th>
                                 <th className="p-2 font-semibold text-rose-600 font-mono text-center w-20 bg-rose-50/10">当前欠货</th>
                                 <th className="p-2 text-center w-32 font-bold text-blue-700">本次到货登录</th>
@@ -1277,6 +1337,16 @@ export default function PurchasingView({
                                       <div className="text-[10px] text-slate-400 font-mono">货号:{order.productCode} Spec: {order.specs}</div>
                                     </td>
                                     <td className="p-2 text-center font-mono">{order.quantity}</td>
+                                    {showPrices && (
+                                      <>
+                                        <td className="p-2 text-center bg-teal-50/10 font-bold text-teal-800 font-mono">
+                                          {order.previousPrice !== undefined ? `¥${order.previousPrice}` : '未指定'}
+                                        </td>
+                                        <td className="p-2 text-center bg-rose-50/10 font-bold text-rose-800 font-mono">
+                                          {order.currentPrice !== undefined ? `¥${order.currentPrice}` : '未指定'}
+                                        </td>
+                                      </>
+                                    )}
                                     <td className="p-2 text-center text-slate-600 font-mono">{received}</td>
                                     <td className="p-2 text-center bg-rose-50/50 font-bold text-rose-600 font-mono">
                                       {short <= 0 ? '0 (到齐)' : short}
@@ -1432,6 +1502,12 @@ export default function PurchasingView({
                     <th className="p-3 w-1/4">商品展示全名称 (必填)</th>
                     <th className="p-3 w-1/6">规格属性 (必填)</th>
                     <th className="p-3 w-28 text-center text-blue-700 font-bold">订单采购量 (套/件)</th>
+                    {showPrices && (
+                      <>
+                        <th className="p-3 w-22 text-center text-teal-850 font-bold bg-teal-50">上次价格 (元)</th>
+                        <th className="p-3 w-22 text-center text-rose-850 font-bold bg-rose-50">本次价格 (元)</th>
+                      </>
+                    )}
                     <th className="p-3 w-12 text-center">操作</th>
                   </tr>
                 </thead>
@@ -1492,6 +1568,32 @@ export default function PurchasingView({
                           <span className="text-slate-400 font-semibold text-[10px]">件</span>
                         </div>
                       </td>
+                      {showPrices && (
+                        <>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.previousPrice !== undefined ? item.previousPrice : ''}
+                              onChange={e => handleDirectItemChange(idx, 'previousPrice', parseFloat(e.target.value) || 0)}
+                              placeholder="上次价 ¥"
+                              className="w-full p-1.5 border border-slate-200 rounded-lg text-center text-xs font-mono text-teal-800 font-semibold bg-white focus:ring-1 focus:ring-teal-500 focus:outline-none"
+                            />
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.currentPrice !== undefined ? item.currentPrice : ''}
+                              onChange={e => handleDirectItemChange(idx, 'currentPrice', parseFloat(e.target.value) || 0)}
+                              placeholder="本次价 ¥"
+                              className="w-full p-1.5 border border-slate-200 rounded-lg text-center text-xs font-mono text-rose-800 font-semibold bg-white focus:ring-1 focus:ring-rose-500 focus:outline-none"
+                            />
+                          </td>
+                        </>
+                      )}
                       <td className="p-3 text-center">
                         <button
                           type="button"
