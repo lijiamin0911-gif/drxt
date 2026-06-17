@@ -18,7 +18,8 @@ import {
   ChevronRight,
   Globe,
   Lock,
-  Search
+  Search,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DbService } from './lib/dbService';
@@ -34,6 +35,7 @@ import ShortageReportView from './components/ShortageReportView';
 import LogsView from './components/LogsView';
 import InventoryView from './components/InventoryView';
 import OrderQueryView from './components/OrderQueryView';
+import SalesAnalysisView from './components/SalesAnalysisView';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -672,12 +674,6 @@ export default function App() {
               >
                 <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
                 <span>欠货与补货分析</span>
-                {orders.filter(o => o.status === 'purchased' && (o.receivedQty || 0) < o.quantity).length > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75 animate-bounce"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                  </span>
-                )}
               </button>
 
               <button
@@ -709,29 +705,53 @@ export default function App() {
                 <Terminal className="w-3.5 h-3.5" />
                 <span>操作审计日志</span>
               </button>
-            </>
-          )}
 
-          {/* Branch Role limits */}
-          {currentUser.role === 'branch' && (
-            <>
               <button
-                onClick={() => setActiveTab('branch-orders')}
-                className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-605 text-white shadow-sm flex items-center gap-1.5 bg-blue-600"
+                onClick={() => setActiveTab('sales-analysis')}
+                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'sales-analysis' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
+                }`}
               >
-                <Building className="w-3.5 h-3.5" />
-                <span>我的分店货品提报提单</span>
+                <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
+                <span>销售数据查看与分析</span>
               </button>
             </>
           )}
 
-          {/* Receptionist Role limits */}
+          {/* Branch Role tabs */}
+          {currentUser.role === 'branch' && (
+            <>
+              <button
+                onClick={() => setActiveTab('branch-orders')}
+                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'branch-orders' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
+                }`}
+              >
+                <Building className="w-3.5 h-3.5" />
+                <span>我的分店货品提报提单</span>
+              </button>
+
+              {currentUser.branchSalesEnabled && (
+                <button
+                  onClick={() => setActiveTab('sales-analysis')}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'sales-analysis' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
+                  }`}
+                >
+                  <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>分店历史销售数据查询</span>
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Receptionist Role limit */}
           {currentUser.role === 'receptionist' && (
             <>
               <button
                 onClick={() => setActiveTab('reception-confirm')}
                 className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === 'reception-confirm' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-105 bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  activeTab === 'reception-confirm' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />
@@ -741,7 +761,7 @@ export default function App() {
               <button
                 onClick={() => setActiveTab('order-query')}
                 className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === 'order-query' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-105 bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  activeTab === 'order-query' ? 'bg-blue-605 bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-650 hover:text-slate-900 border border-transparent hover:border-slate-100'
                 }`}
               >
                 <Search className="w-3.5 h-3.5" />
@@ -781,6 +801,16 @@ export default function App() {
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-blue-500" />
                 <span>总部备货与零库采购</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('sales-analysis')}
+                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'sales-analysis' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
+                <span>销售数据查看与分析</span>
               </button>
             </>
           )}
@@ -860,6 +890,12 @@ export default function App() {
           {activeTab === 'order-query' && (
             <OrderQueryView
               orders={orders}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeTab === 'sales-analysis' && (
+            <SalesAnalysisView
               currentUser={currentUser}
             />
           )}

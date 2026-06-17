@@ -51,6 +51,7 @@ const DEFAULT_HISTORY_COLS = [
 ];
 
 export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrders, currentUser }: BranchOrderViewProps) {
+  const canSeeSales = currentUser.role === 'admin' || currentUser.role === 'purchasing' || currentUser.branchSalesEnabled;
   const [activeTab, setActiveTab] = useState<'catalog' | 'draft' | 'history' | 'shortages' | 'permanent_cancelled' | 'cancelled_orders'>('catalog');
   
   // Selection state for draft list
@@ -98,6 +99,8 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
 
   // Load officially approved products
   const [officialProducts, setOfficialProducts] = useState<Product[]>([]);
+  const [salesRefs, setSalesRefs] = useState<{ [code: string]: { avg3Months: number; lastYearSameMonth: number } }>({});
+
   React.useEffect(() => {
     DbService.getProducts().then(prods => {
       // Filter only approved formal products
@@ -109,6 +112,28 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
       setPermCancelledProducts(cancelledList);
     });
   }, [orders]); // Refresh products if orders change or system refreshes
+
+  React.useEffect(() => {
+    // Only load if user is admin, purchasing, or has sales view enabled
+    const canSeeSales = currentUser.role === 'admin' || currentUser.role === 'purchasing' || currentUser.branchSalesEnabled;
+    if (!canSeeSales) return;
+
+    const loadSalesRefs = async () => {
+      const activeMonthStr = new Date().toISOString().slice(0, 7); // e.g. "2026-06"
+      const refs: { [code: string]: { avg3Months: number; lastYearSameMonth: number } } = {};
+      const branchFilter = currentUser.role === 'branch' ? currentUser.username : undefined; 
+
+      for (const p of officialProducts) {
+        const res = await DbService.calculateSalesReference(p.productCode, activeMonthStr, branchFilter);
+        refs[p.productCode] = res;
+      }
+      setSalesRefs(refs);
+    };
+
+    if (officialProducts.length > 0) {
+      loadSalesRefs();
+    }
+  }, [officialProducts, currentUser]);
 
   // Count branch urgent items submitted on the chosen orderDate
   const todayStr = orderDate;
@@ -1059,6 +1084,12 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                     <th className="p-2.5 w-10 text-center">选择</th>
                     <th className="p-2.5">商品名称 / 货号编码</th>
                     <th className="p-2.5">规格型号</th>
+                    {canSeeSales && (
+                      <>
+                        <th className="p-2.5 text-center text-indigo-700 bg-indigo-50/50">近3月均规销量</th>
+                        <th className="p-2.5 text-center text-teal-700 bg-teal-50/50">去年同月销量</th>
+                      </>
+                    )}
                     <th className="p-2.5 text-center w-28">指定数量</th>
                     <th className="p-2.5">所属默认供货厂家</th>
                   </tr>
@@ -1105,6 +1136,16 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                             <div className="text-[10px] text-slate-400 font-mono">CODE: {p.productCode}</div>
                           </td>
                           <td className="p-2 font-semibold text-slate-500">{p.specs}</td>
+                          {canSeeSales && (
+                            <>
+                              <td className="p-2 text-center font-mono text-indigo-600 font-bold bg-indigo-50/10">
+                                {salesRefs[p.productCode]?.avg3Months ?? 0} <span className="text-[10px] text-slate-400 font-normal">件</span>
+                              </td>
+                              <td className="p-2 text-center font-mono text-teal-600 font-bold bg-teal-50/10" title="去年此月的历史总销量">
+                                {salesRefs[p.productCode]?.lastYearSameMonth ?? 0} <span className="text-[10px] text-slate-400 font-normal">件</span>
+                              </td>
+                            </>
+                          )}
                           <td className="p-2 text-center">
                             <input
                               type="number"
@@ -1135,7 +1176,7 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                       return sMatch && fMatch;
                     }).length === 0 && (
                       <tr>
-                        <td colSpan={5} className="p-6 text-center text-slate-400 text-xs font-medium">
+                        <td colSpan={canSeeSales ? 7 : 5} className="p-6 text-center text-slate-400 text-xs font-medium">
                           未匹配到相关未永久注销之官方正式商品
                         </td>
                       </tr>
@@ -1452,6 +1493,15 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                                     </option>
                                   ))}
                                 </select>
+                              </div>
+                            )}
+
+                            {canSeeSales && row.productCode && salesRefs[row.productCode] && (
+                              <div className="flex items-center gap-2.5 px-2.5 py-1 bg-indigo-50/60 rounded border border-indigo-100 text-[10px] font-bold shadow-2xs">
+                                <span className="text-slate-500">📈 报表指导:</span>
+                                <span className="text-indigo-600">近3月均销 {salesRefs[row.productCode].avg3Months} 件</span>
+                                <span className="text-slate-300">|</span>
+                                <span className="text-teal-600">去年同月({new Date().getFullYear() - 1}年{new Date().getMonth() + 1}月)销量 {salesRefs[row.productCode].lastYearSameMonth} 件</span>
                               </div>
                             )}
                           </div>

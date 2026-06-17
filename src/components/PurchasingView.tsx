@@ -49,6 +49,7 @@ export default function PurchasingView({
   
   // Load suppliers and approved products for manual creator
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [salesRefs, setSalesRefs] = useState<{ [code: string]: { avg3Months: number; lastYearSameMonth: number } }>({});
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [procurementStaff, setProcurementStaff] = useState<User[]>([]);
   const [selectedMerchandiserFilter, setSelectedMerchandiserFilter] = useState<string>(() => {
@@ -66,6 +67,23 @@ export default function PurchasingView({
       setProcurementStaff(usersList.filter(u => u.role === 'purchasing' || u.role === 'admin' || u.role === 'receptionist'));
     });
   }, [orders]); // Refresh when orders or system refreshes
+
+  React.useEffect(() => {
+    const loadSalesRefs = async () => {
+      const activeMonthStr = new Date().toISOString().slice(0, 7); // e.g. "2026-06"
+      const refs: { [code: string]: { avg3Months: number; lastYearSameMonth: number } } = {};
+      
+      for (const p of allProducts) {
+        const res = await DbService.calculateSalesReference(p.productCode, activeMonthStr);
+        refs[p.productCode] = res;
+      }
+      setSalesRefs(refs);
+    };
+
+    if (allProducts.length > 0) {
+      loadSalesRefs();
+    }
+  }, [allProducts]);
 
   const handleUpdateOrderMerchandiser = async (orderId: string, merchandiserName: string) => {
     try {
@@ -1571,6 +1589,13 @@ export default function PurchasingView({
                             </option>
                           ))}
                         </select>
+                        {item.productCode && salesRefs[item.productCode] && (
+                          <div className="mt-1.2 flex flex-wrap gap-1.5 items-center text-[10px] font-bold">
+                            <span className="text-slate-400">📈 参谋:</span>
+                            <span className="text-indigo-600 bg-indigo-50/50 px-1.5 py-0.5 rounded-md">近3月均销 {salesRefs[item.productCode].avg3Months} 件</span>
+                            <span className="text-teal-600 bg-teal-50/50 px-1.5 py-0.5 rounded-md">去年同月销 {salesRefs[item.productCode].lastYearSameMonth} 件</span>
+                          </div>
+                        )}
                       </td>
                       <td className="p-3">
                         <input

@@ -1893,6 +1893,56 @@ export class DbService {
     return getLocalData<SalesRecord[]>('db_sales_records', []);
   }
 
+  public static async calculateSalesReference(
+    productCode: string,
+    currentDateStr: string, // e.g. '2026-06'
+    branchName?: string // Optional filter
+  ): Promise<{ avg3Months: number; lastYearSameMonth: number }> {
+    const records = await this.getSalesRecords();
+    
+    // Filter records for the correct product and optional branch
+    const filtered = records.filter(r => {
+      const codeMatch = r.productCode === productCode;
+      if (!codeMatch) return false;
+      if (branchName) {
+        return r.branchName === branchName;
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      return { avg3Months: 0, lastYearSameMonth: 0 };
+    }
+
+    // Parse target date (e.g. '2026-06')
+    const parts = currentDateStr.split('-');
+    const currentYear = parseInt(parts[0], 10);
+    const currentMonth = parseInt(parts[1], 10);
+
+    // Calculate last year same month (e.g. '2025-06')
+    const lastYearStr = `${currentYear - 1}-${String(currentMonth).padStart(2, '0')}`;
+    const lastYearSameMonthRecords = filtered.filter(r => r.month === lastYearStr);
+    const lastYearSameMonth = lastYearSameMonthRecords.reduce((sum, r) => sum + r.quantity, 0);
+
+    // Calculate last 3 months
+    const last3MonthsStrings: string[] = [];
+    for (let i = 1; i <= 3; i++) {
+      let m = currentMonth - i;
+      let y = currentYear;
+      if (m <= 0) {
+        m += 12;
+        y -= 1;
+      }
+      last3MonthsStrings.push(`${y}-${String(m).padStart(2, '0')}`);
+    }
+
+    const last3MonthsRecords = filtered.filter(r => last3MonthsStrings.includes(r.month));
+    const total3MonthsQty = last3MonthsRecords.reduce((sum, r) => sum + r.quantity, 0);
+    const avg3Months = Math.round((total3MonthsQty / 3) * 10) / 10;
+
+    return { avg3Months, lastYearSameMonth };
+  }
+
   public static async saveSalesRecords(records: SalesRecord[], operator: { id: string; name: string; role: string }): Promise<void> {
     if (isFirebaseConfigured && db) {
       try {

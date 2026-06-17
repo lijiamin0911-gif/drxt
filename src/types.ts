@@ -141,6 +141,7 @@ export interface InventoryItem {
 export interface SalesRecord {
   id: string;
   branchName: string;
+  supplierName: string;
   productCode: string;
   productName: string;
   specs: string;
