@@ -692,30 +692,30 @@ export default function PurchasingView({
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Build control card */}
-              <div className="bg-white p-4 md:p-6 border border-slate-100 rounded-xl shadow-sm h-fit space-y-4 lg:col-span-1 text-left">
+              <div className="bg-white p-4 md:p-6 border border-slate-100 rounded-xl shadow-sm h-fit space-y-4 lg:col-span-1">
                 <div className="flex items-center gap-2 text-blue-600">
                   <PlusSquare className="w-5 h-5" />
                   <h3 className="font-semibold text-slate-800 text-sm md:text-base">合并生成最终采购合同</h3>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
+                <p className="text-xs text-slate-500 leading-relaxed">
                   选择右侧列表中所需提报的订货单行。系统会自动按照商品所配置的<strong>【目标供应商/生产厂商】</strong>自动分解，在保存时打包生成格式标准化的独立采购单合约。
                 </p>
 
-                <div className="pt-2 border-t border-slate-100 space-y-4">
-                  <div className="flex items-center justify-between text-xs font-semibold">
+                <div className="pt-2 border-t border-slate-50 space-y-4">
+                  <div className="flex items-center justify-between text-xs font-medium">
                     <span className="text-slate-600">当前已勾选：</span>
-                    <span className="bg-blue-50 text-blue-700 font-extrabold px-2 py-0.5 rounded font-mono">
+                    <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded font-mono">
                       {selectedOrderIds.length} 笔订单
                     </span>
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-xs font-semibold text-slate-700">采购备注</label>
+                    <label className="block text-xs font-medium text-slate-700">采购备注</label>
                     <textarea
                       placeholder="选填。例如：急件请核对批次或附注合同约定条款等"
                       value={poRemarks}
                       onChange={e => setPoRemarks(e.target.value)}
-                      className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 bg-slate-50 h-20 resize-none focus:outline-none"
+                      className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 bg-slate-50 h-20 resize-none"
                     />
                   </div>
 
@@ -724,7 +724,7 @@ export default function PurchasingView({
                       <button
                         type="button"
                         onClick={selectAllPendingItems}
-                        className="flex-1 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                        className="flex-1 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium transition-colors cursor-pointer"
                       >
                         {selectedOrderIds.length === pendingPurchaseItems.length ? '取消全选' : '整单全选'}
                       </button>
@@ -732,7 +732,7 @@ export default function PurchasingView({
                         type="button"
                         onClick={handleBuildPOs}
                         disabled={selectedOrderIds.length === 0 || isGenerating}
-                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer disabled:bg-blue-400 shadow-sm"
+                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors cursor-pointer disabled:bg-blue-400 shadow-sm"
                       >
                         {isGenerating ? '正在生成...' : '立即生成采购合同'}
                       </button>
@@ -742,7 +742,7 @@ export default function PurchasingView({
                       <button
                         type="button"
                         onClick={handleBatchCancelOrders}
-                        className="w-full py-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm"
+                        className="w-full py-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 shadow-xs"
                       >
                         <Trash2 className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
                         <span>批量注销/取消已选 ({selectedOrderIds.length} 笔)</span>
@@ -1209,6 +1209,9 @@ export default function PurchasingView({
                     </div>
                   );
                 })()}
+
+
+
               </div>
             </div>
           )}
