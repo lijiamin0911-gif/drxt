@@ -18,7 +18,6 @@ if (isConfigured) {
     app = initializeApp(firebaseConfig);
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true,
-      experimentalAutoDetectLongPolling: true,
     }, firebaseConfig.firestoreDatabaseId);
     auth = getAuth(app);
   } catch (error) {
