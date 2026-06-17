@@ -17,11 +17,15 @@ import {
   Clock,
   Sparkles,
   Plus,
-  X
+  X,
+  Upload,
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
-import { Order, User, Supplier, InventoryItem } from '../types';
+import { Order, User, Supplier, InventoryItem, Product } from '../types';
 import { DbService } from '../lib/dbService';
 import ExportButton from './ExportButton';
+import * as XLSX from 'xlsx';
 
 interface ReceptionConfirmViewProps {
   orders: Order[];
@@ -65,6 +69,8 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
   const [remarksToOrder, setRemarksToOrder] = useState<{ [itemCode: string]: string }>({});
   const [selectedSuppliersForItem, setSelectedSuppliersForItem] = useState<{ [itemCode: string]: string }>({});
   const [selectedMerchandiserFilterForCheck, setSelectedMerchandiserFilterForCheck] = useState<string>('all');
+  const [showImportPanel, setShowImportPanel] = useState(false);
+  const [officialProducts, setOfficialProducts] = useState<Product[]>([]);
 
   const fetchSuppliersAndInventory = () => {
     DbService.getSuppliers().then(sups => {
@@ -73,11 +79,156 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
     DbService.getInventory().then(items => {
       setInventoryItems(items);
     });
+    DbService.getProducts().then(prods => {
+      setOfficialProducts(prods);
+    });
   };
 
   useEffect(() => {
     fetchSuppliersAndInventory();
   }, [orders]);
+
+  const downloadReceptionTemplate = () => {
+    try {
+      const data = [
+        ["流出分店名称", "商品编码", "商品名称", "规格型号", "订货数量", "首选供应商/厂家", "下单类型 (常规/样品/特配/补件)", "单行详细备注 / 定制需求说明"],
+        ["城东分店", "PROD-A01", "九牧不锈钢暗装高档水龙头", "SS-901-HM", 15, "九牧卫浴制造厂", "常规", "一楼男洗手间损坏更换"],
+        ["城南分店", "PROD-B05", "飞利浦智能LED吸顶灯 50W", "PL-M50W-LED", 25, "飞利浦合肥照明厂", "常规", "二层前厅天花板吊顶替换"],
+        ["总部备货库", "PROD-NEW-99", "高级纳米防爆花洒套件", "NM-HS-99", 8, "广州卫浴五金厂", "样品", "客制化样板展示需求"]
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      
+      ws['!cols'] = [
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 30 },
+        { wch: 22 },
+        { wch: 12 },
+        { wch: 26 },
+        { wch: 26 },
+        { wch: 45 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "前台代客批量导入模版");
+      XLSX.writeFile(wb, "前台批量代录入提货单标准模版.xlsx");
+    } catch (e: any) {
+      alert("下载模板出错：" + e.message);
+    }
+  };
+
+  const handleReceptionFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        let headerSkipped = false;
+        let parsedCount = 0;
+        const newImportedOrders: Order[] = [];
+
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const createdAtStr = `${now.toISOString().slice(0, 10)} ${hh}:${mm}`;
+
+        for (const row of rawJson) {
+          if (!Array.isArray(row) || row.length === 0) continue;
+          
+          const col0Str = String(row[0] || '').trim();
+          const col1Str = String(row[1] || '').trim();
+          if (
+            !headerSkipped &&
+            (col0Str.includes('分店') ||
+              col1Str.includes('商品编码') ||
+              col1Str.includes('产品编码') ||
+              col1Str.includes('CODE') ||
+              col1Str.includes('代码') ||
+              col1Str.includes('编码'))
+          ) {
+            headerSkipped = true;
+            continue;
+          }
+
+          const branchNameVal = String(row[0] || '').trim() || '前台代客提报';
+          const code = String(row[1] || '').trim();
+          const name = String(row[2] || '').trim();
+          const specs = String(row[3] || '').trim();
+          const qtyVal = parseInt(String(row[4] || '1'), 10) || 1;
+          const supplier = String(row[5] || '').trim();
+          const orderTypeStr = String(row[6] || '常规').trim();
+          const remark = String(row[7] || '').trim();
+
+          if (!code && !name) continue;
+
+          const matched = officialProducts.find(
+            p => p.productCode.trim().toLowerCase() === code.trim().toLowerCase()
+          );
+
+          const finalSupplier = supplier || (matched ? (matched.defaultSupplier || '系统自提厂商') : '随单指定厂商');
+          const matchedSupplierObj = suppliers.find(s => s.name.trim() === finalSupplier.trim());
+          const merchandiserName = matchedSupplierObj ? matchedSupplierObj.merchandiserName : undefined;
+          const leadTimeText = matchedSupplierObj ? matchedSupplierObj.leadTimeText : undefined;
+
+          const orderNoStr = `SO-RC-${dateStr}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+          const newOrder: Order = {
+            id: `ord_${Date.now()}_RC_${parsedCount}_${Math.floor(Math.random() * 1000)}`,
+            orderNo: orderNoStr,
+            branchId: `rc_import_${encodeURIComponent(branchNameVal)}`,
+            branchName: branchNameVal,
+            productCode: code || (matched ? matched.productCode : ('IMP-' + Date.now())),
+            productName: name || (matched ? matched.productName : '导入未知商品'),
+            specs: specs || (matched ? matched.specs : '通用规格'),
+            quantity: Math.max(1, qtyVal),
+            receivedQty: 0,
+            status: 'pending_confirm', // To appear in the review list
+            supplier: finalSupplier,
+            orderType: (orderTypeStr === '常规' || orderTypeStr === 'conventional') ? 'conventional' : 'custom',
+            remark: remark || '前台大批量代理进口提单',
+            createdAt: createdAtStr,
+            merchandiserName,
+            leadTimeText
+          };
+
+          newImportedOrders.push(newOrder);
+          parsedCount++;
+        }
+
+        if (newImportedOrders.length === 0) {
+          alert('未能从选择的文件中提取到可读的订单项（格式要求流出分店名称作为第一列，商品编码作为第二列）');
+          return;
+        }
+
+        // Save orders to DB in a loop
+        let savedCount = 0;
+        for (const order of newImportedOrders) {
+          await DbService.saveOrder(order, {
+            id: currentUser.id,
+            name: currentUser.username,
+            role: currentUser.role
+          });
+          savedCount++;
+        }
+
+        alert(`🎉 成功导入并上报 ${savedCount} 款订单货项！所有新订单已直载进入前台【分店提单待审核】待办池中。`);
+        setShowImportPanel(false);
+      } catch (e: any) {
+        console.error(e);
+        alert("解析 Excel 文件出错：" + e.message);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   const handleCreateReplenishmentOrder = async (item: InventoryItem) => {
     const rawQty = quantitiesToOrder[item.productCode];
@@ -581,6 +732,20 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
                 fileName="待审核分店提报流转大货订单" 
               />
 
+              {/* Import Orders Trigger */}
+              <button
+                type="button"
+                onClick={() => setShowImportPanel(!showImportPanel)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                  showImportPanel 
+                    ? 'bg-amber-100 border-amber-300 text-amber-850' 
+                    : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                <span>批量导入订单</span>
+              </button>
+
               {/* Confirm Selection Action Button */}
               <button
                 onClick={handleBatchConfirmSubmit}
@@ -592,6 +757,45 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
               </button>
             </div>
           </div>
+
+          {showImportPanel && (
+            <div className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-xl space-y-4 shadow-3xs animate-fadeIn">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <h4 className="text-xs font-extrabold text-slate-850 flex items-center gap-1.5 font-sans">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>前台代客分店订单 - Excel表格一键解析上报</span>
+                  </h4>
+                  <p className="text-[10px] text-slate-500 leading-normal">
+                    支持读取 Excel (.xlsx/.xls) 文件或 CSV 电子表格。导入的订单会直接以【待核准分店新单】的状态同步进入前台等待审核与一键确认。
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={downloadReceptionTemplate}
+                    className="flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-slate-50 font-bold border border-slate-200 text-slate-700 rounded-lg text-[10px] transition-all cursor-pointer shadow-3xs font-sans"
+                    title="下载格式完全对接系统的标准微软 Excel 订单提货代录入模版"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-600" />
+                    <span>下载空白代录订单模板.xlsx</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-dashed border-slate-200 hover:border-blue-400 bg-white rounded-lg p-5 transition-colors cursor-pointer text-center relative flex flex-col items-center justify-center gap-1.5 group">
+                <Upload className="w-6 h-6 text-slate-450 group-hover:text-blue-500 duration-150" />
+                <span className="text-xs font-bold text-slate-700 group-hover:text-blue-600 duration-150">点击或将订单 Excel 拖拽到此处进行智能识别</span>
+                <span className="text-[10px] text-slate-400">支持 .xlsx / .xls / .csv 格式</span>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleReceptionFileImport}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Pending Table */}
           <div className="overflow-x-auto border border-slate-50 rounded-lg">

@@ -63,12 +63,20 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
   const [pin, setPin] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [isViceAdmin, setIsViceAdmin] = useState(false);
+  const [branchSalesEnabled, setBranchSalesEnabled] = useState(false);
+  const [branchStockEnabled, setBranchStockEnabled] = useState(false);
+
   // Edit user state
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editUsername, setEditUsername] = useState('');
   const [editRole, setEditRole] = useState<Role>('branch');
   const [editBranchName, setEditBranchName] = useState('');
   const [editPin, setEditPin] = useState('');
+
+  const [editIsViceAdmin, setEditIsViceAdmin] = useState(false);
+  const [editBranchSalesEnabled, setEditBranchSalesEnabled] = useState(false);
+  const [editBranchStockEnabled, setEditBranchStockEnabled] = useState(false);
 
   // Account Bulk Excel Import/Export Workspace States
   const [showImportUserPanel, setShowImportUserPanel] = useState(false);
@@ -98,6 +106,23 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       }
     }
 
+    // Validate limit rules
+    if (editRole === 'admin' && editIsViceAdmin) {
+      const viceAdminsCount = users.filter(u => u.role === 'admin' && u.isViceAdmin === true && u.id !== editingUser.id).length;
+      if (viceAdminsCount >= 5) {
+        alert('🎨 【系统安全红线】系统中已存在 5 个副管理员账户，额度已满，无法分配更多副管理员！');
+        return;
+      }
+    }
+
+    if (editRole === 'branch') {
+      const branchCount = users.filter(u => u.role === 'branch' && u.id !== editingUser.id).length;
+      if (branchCount >= 300) {
+        alert('🏪 【系统额度红线】系统中已存在 300 个分店账户，额度已满，无法注册更多分店！');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     const updatedUser: User = {
       ...editingUser,
@@ -108,8 +133,19 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
 
     if (editRole === 'branch') {
       updatedUser.branchName = editBranchName.trim();
+      updatedUser.branchSalesEnabled = editBranchSalesEnabled;
+      updatedUser.branchStockEnabled = editBranchStockEnabled;
+      delete updatedUser.isViceAdmin;
+    } else if (editRole === 'admin') {
+      updatedUser.isViceAdmin = editIsViceAdmin;
+      delete updatedUser.branchName;
+      delete updatedUser.branchSalesEnabled;
+      delete updatedUser.branchStockEnabled;
     } else {
       delete updatedUser.branchName;
+      delete updatedUser.branchSalesEnabled;
+      delete updatedUser.branchStockEnabled;
+      delete updatedUser.isViceAdmin;
     }
 
     try {
@@ -143,6 +179,23 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       return;
     }
 
+    // Validate limit rules
+    if (role === 'admin' && isViceAdmin) {
+      const viceAdminsCount = users.filter(u => u.role === 'admin' && u.isViceAdmin === true).length;
+      if (viceAdminsCount >= 5) {
+        alert('🎨 【系统安全红线】系统中已存在 5 个副管理员账户，额度已满，无法分配更多副管理员！');
+        return;
+      }
+    }
+
+    if (role === 'branch') {
+      const branchCount = users.filter(u => u.role === 'branch').length;
+      if (branchCount >= 300) {
+        alert('🏪 【系统额度红线】系统中已存在 300 个分店账户，额度已满，无法注册更多分店！');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     const newUser: User = {
       id: 'u_' + Date.now() + Math.random().toString(36).substring(2, 6),
@@ -155,6 +208,10 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
 
     if (role === 'branch') {
       newUser.branchName = branchName.trim();
+      newUser.branchSalesEnabled = branchSalesEnabled;
+      newUser.branchStockEnabled = branchStockEnabled;
+    } else if (role === 'admin') {
+      newUser.isViceAdmin = isViceAdmin;
     }
 
     try {
@@ -164,6 +221,9 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       setBranchName('');
       setPin('');
       setRole('branch');
+      setIsViceAdmin(false);
+      setBranchSalesEnabled(false);
+      setBranchStockEnabled(false);
       alert(`账户 [${newUser.username}] 创建成功！`);
     } catch (err) {
       console.error(err);
@@ -179,7 +239,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
         ["账号名称（必填，唯一例: 城东分店）", "权限身份（必填：分店 / 采购 / 前台 / 管理员）", "关联分店名称（仅分店填，必须和实际名称一致）", "登录密码PIN码（推荐至少4位数字）", "是否启用（是 / 否）"],
         ["城东一号店", "分店", "城东第一分店", "123456", "是"],
         ["城西二号店", "分店", "城西第二分店", "888888", "是"],
-        ["采购主管小陈", "采购", "", "666666", "是"],
+        ["采购小陈", "采购", "", "666666", "是"],
         ["前台助理阿花", "前台", "", "999999", "是"],
         ["临过期休眠分店", "分店", "城南旧货仓库", "111111", "否"]
       ];
@@ -344,6 +404,33 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       return;
     }
 
+    // Validate boundary constraints
+    const currentBranchCount = users.filter(u => u.role === 'branch').length;
+    const newBranchesBatch = validItems.filter(item => {
+      if (item.role !== 'branch') return false;
+      const alreadyExists = users.some(u => u.username.toLowerCase() === item.username.toLowerCase() && u.role === 'branch');
+      return !alreadyExists;
+    }).length;
+
+    if (currentBranchCount + newBranchesBatch > 300) {
+      alert(`🏪 【分店数量红线】提交失败！本批次新增分店数为 ${newBranchesBatch}。当前已有分店数为 ${currentBranchCount}，合并后将超出 300 个分店数上限！`);
+      return;
+    }
+
+    const currentViceCount = users.filter(u => u.role === 'admin' && u.isViceAdmin === true).length;
+    const newViceBatch = validItems.filter(item => {
+      if (item.role !== 'admin') return false;
+      const isVice = item.username.includes('副');
+      if (!isVice) return false;
+      const alreadyExists = users.some(u => u.username.toLowerCase() === item.username.toLowerCase() && u.role === 'admin' && u.isViceAdmin === true);
+      return !alreadyExists;
+    }).length;
+
+    if (currentViceCount + newViceBatch > 5) {
+      alert(`🎨 【副管理员红线】提交失败！本批次新制副管理员数为 ${newViceBatch}。当前已有副管理员数为 ${currentViceCount}，合并后将超出 5 人上限！`);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const result = await DbService.importUsers(validItems, {
@@ -469,22 +556,22 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
   const getRoleBadge = (user: User) => {
     switch (user.role) {
       case 'admin':
-        const isVice = user.username.includes('副') || user.username.toLowerCase().includes('vice') || user.username.toLowerCase().includes('sub');
+        const isVice = user.isViceAdmin;
         return (
-          <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border ${
+          <span className={`px-2 py-0.5 text-xs font-bold rounded-full border ${
             isVice 
-              ? 'bg-amber-50 text-amber-700 border-amber-100' 
-              : 'bg-rose-50 text-rose-700 border-rose-100'
+              ? 'bg-amber-50 text-amber-700 border-amber-105' 
+              : 'bg-rose-50 text-rose-700 border-rose-105'
           }`}>
             {isVice ? '副管理员' : '系统管理员(总)'}
           </span>
         );
       case 'branch':
-        return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-green-50 text-green-700 border border-green-100">分店账户</span>;
+        return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-green-50 text-green-700 border border-green-105">分店账户</span>;
       case 'receptionist':
-        return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-50 text-blue-700 border border-blue-100">前台汇总</span>;
+        return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-105">前台汇总</span>;
       case 'purchasing':
-        return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-750 text-indigo-700 border border-indigo-100">采购主管</span>;
+        return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-105">采购</span>;
     }
   };
 
@@ -578,19 +665,60 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                   </select>
                 </div>
 
+                {editRole === 'admin' && (
+                  <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-150 rounded-lg animate-fadeIn">
+                    <input
+                      type="checkbox"
+                      id="editIsViceAdmin"
+                      checked={editIsViceAdmin}
+                      onChange={e => setEditIsViceAdmin(e.target.checked)}
+                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                    />
+                    <label htmlFor="editIsViceAdmin" className="text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                      是否设为副管理员账号 (禁止增删账号、禁用账号、修改全局配置)
+                    </label>
+                  </div>
+                )}
+
                 {editRole === 'branch' && (
-                  <div className="space-y-1 animate-fadeIn">
-                    <label className="block text-xs font-medium text-slate-700">关联分店名称</label>
-                    <div className="relative">
-                      <Building className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                  <div className="space-y-1.5 p-2.5 bg-slate-50 border border-slate-150 rounded-lg animate-fadeIn">
+                    <div className="space-y-1">
+                      <label className="block text-xs font-semibold text-slate-600">关联本分店名称</label>
+                      <div className="relative">
+                        <Building className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                        <input
+                          type="text"
+                          required
+                          placeholder="例如：城东分店"
+                          value={editBranchName}
+                          onChange={e => setEditBranchName(e.target.value)}
+                          className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 text-slate-855 font-bold"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1.5 border-t border-slate-200/50">
                       <input
-                        type="text"
-                        required
-                        placeholder="例如：城东分店"
-                        value={editBranchName}
-                        onChange={e => setEditBranchName(e.target.value)}
-                        className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 text-slate-850 font-bold"
+                        type="checkbox"
+                        id="editBranchSalesEnabled"
+                        checked={editBranchSalesEnabled}
+                        onChange={e => setEditBranchSalesEnabled(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
                       />
+                      <label htmlFor="editBranchSalesEnabled" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">
+                        分店可查看本店销售报表 (近3月平均，历史平均)
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="editBranchStockEnabled"
+                        checked={editBranchStockEnabled}
+                        onChange={e => setEditBranchStockEnabled(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                      />
+                      <label htmlFor="editBranchStockEnabled" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">
+                        分店可在库导入及订货提示
+                      </label>
                     </div>
                   </div>
                 )}
@@ -630,75 +758,124 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
               </form>
             ) : (
               <form onSubmit={handleCreateUser} className="space-y-4 pt-2 border-t border-slate-50">
-                <div className="space-y-1">
-                  <label className="block text-xs font-medium text-slate-700">账户名称 / 姓名</label>
-                  <div className="relative">
-                    <UserIcon className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                    <input
-                      type="text"
-                      required
-                      placeholder="例如：城南分店 / 采购小张"
-                      value={username}
-                      onChange={e => setUsername(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
-                    />
+                {currentUser?.isViceAdmin ? (
+                  <div className="p-3 bg-slate-100 rounded-lg text-slate-500 border border-slate-200 border-dashed text-xs text-center font-semibold leading-normal">
+                    ⚙️ 您当前是【副管理员】身份，无权新增、删除或禁用系统账户。
                   </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-medium text-slate-700">系统身份 / 角色权限</label>
-                  <select
-                    value={role}
-                    onChange={e => setRole(e.target.value as Role)}
-                    className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 font-medium"
-                  >
-                    <option value="branch">分店账号 (只能提交及查看本店订单)</option>
-                    <option value="receptionist">前台账号 (核对并一键批量确认订单)</option>
-                    <option value="purchasing">采购账号 (合并采购单、厂家发货跟踪)</option>
-                    <option value="admin">系统管理员 - 总/副 (最高账号管理、报警线及查看日志)</option>
-                  </select>
-                </div>
-
-                {role === 'branch' && (
-                  <div className="space-y-1 animate-fadeIn">
-                    <label className="block text-xs font-medium text-slate-700">关联分店名称</label>
-                    <div className="relative">
-                      <Building className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                      <input
-                        type="text"
-                        required
-                        placeholder="例如：城东分店"
-                        value={branchName}
-                        onChange={e => setBranchName(e.target.value)}
-                        className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
-                      />
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-slate-700">账户名称 / 姓名</label>
+                      <div className="relative">
+                        <UserIcon className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                        <input
+                          type="text"
+                          required
+                          placeholder="例如：城南分店 / 采购小张"
+                          value={username}
+                          onChange={e => setUsername(e.target.value)}
+                          className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+                        />
+                      </div>
                     </div>
-                  </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-slate-700">系统身份 / 角色权限</label>
+                      <select
+                        value={role}
+                        onChange={e => setRole(e.target.value as Role)}
+                        className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 font-medium"
+                      >
+                        <option value="branch">分店账号 (只能提交及查看本店订单)</option>
+                        <option value="receptionist">前台账号 (核对并一键批量确认订单)</option>
+                        <option value="purchasing">采购账号 (合并采购单、厂家发货跟踪)</option>
+                        <option value="admin">系统管理员 - 总/副 (最高账号管理、报警线及查看日志)</option>
+                      </select>
+                    </div>
+
+                    {role === 'admin' && (
+                      <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-150 rounded-lg animate-fadeIn">
+                        <input
+                          type="checkbox"
+                          id="isViceAdmin"
+                          checked={isViceAdmin}
+                          onChange={e => setIsViceAdmin(e.target.checked)}
+                          className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                        />
+                        <label htmlFor="isViceAdmin" className="text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                          是否设为副管理员账号 (禁止增删账号、禁用账号、修改全局配置)
+                        </label>
+                      </div>
+                    )}
+
+                    {role === 'branch' && (
+                      <div className="space-y-1.5 p-2 bg-slate-50 border border-slate-150 rounded-lg animate-fadeIn">
+                        <div className="space-y-1">
+                          <label className="block text-xs font-semibold text-slate-600">关联本分店名称</label>
+                          <div className="relative">
+                            <Building className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                            <input
+                              type="text"
+                              required
+                              placeholder="例如：城东分店"
+                              value={branchName}
+                              onChange={e => setBranchName(e.target.value)}
+                              className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 text-slate-855 font-semibold"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 pt-1 border-t border-slate-200/50">
+                          <input
+                            type="checkbox"
+                            id="branchSalesEnabled"
+                            checked={branchSalesEnabled}
+                            onChange={e => setBranchSalesEnabled(e.target.checked)}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                          />
+                          <label htmlFor="branchSalesEnabled" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">
+                            允许此分店单独开启近3月及往期销量查看权限
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="branchStockEnabled"
+                            checked={branchStockEnabled}
+                            onChange={e => setBranchStockEnabled(e.target.checked)}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                          />
+                          <label htmlFor="branchStockEnabled" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">
+                            允许此分店单独打开自身在库量导入及参考订货提示
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-slate-700">登录安全 PIN 码</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                        <input
+                          type="text"
+                          required
+                          maxLength={10}
+                          placeholder="4-8 位登录用数字 PIN"
+                          value={pin}
+                          onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
+                          className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 font-mono tracking-widest"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors cursor-pointer disabled:bg-blue-400 mt-2"
+                    >
+                      {isSubmitting ? '正在提交...' : '确认并创建账号'}
+                    </button>
+                  </>
                 )}
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-medium text-slate-700">登录安全 PIN 码</label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                    <input
-                      type="text"
-                      required
-                      maxLength={10}
-                      placeholder="4-8 位登录用数字 PIN"
-                      value={pin}
-                      onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
-                      className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 font-mono tracking-widest"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors cursor-pointer disabled:bg-blue-400 mt-2"
-                >
-                  {isSubmitting ? '正在提交...' : '确认并创建账号'}
-                </button>
               </form>
             )}
           </div>

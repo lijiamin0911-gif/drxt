@@ -8,7 +8,9 @@ import {
   ArrowRight,
   TrendingUp,
   Sliders,
-  Building
+  Building,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { Order, User, SystemConfig } from '../types';
 import ExportButton from './ExportButton';
@@ -25,6 +27,7 @@ export default function ShortageReportView({ orders, systemConfig, onReplenish, 
   const [productSearch, setProductSearch] = useState('');
   const [shortageOnly, setShortageOnly] = useState<boolean>(true); // default true: only show actual shortfalls
   const [isReplenishingId, setIsReplenishingId] = useState<string | null>(null);
+  const [collapsedSuppliers, setCollapsedSuppliers] = useState<{ [supplier: string]: boolean }>({});
 
   // Extract unique branches
   const uniqueBranches = Array.from(new Set(orders.map(o => o.branchName)));
@@ -54,6 +57,13 @@ export default function ShortageReportView({ orders, systemConfig, onReplenish, 
     const sMatch = !shortageOnly || item.qtyShort > 0;
     return bMatch && pMatch && sMatch;
   });
+
+  const shortagesBySupplier: { [supplier: string]: typeof filteredShortages } = {};
+  for (const item of filteredShortages) {
+    const sup = item.supplier || '未指定生产厂家';
+    if (!shortagesBySupplier[sup]) shortagesBySupplier[sup] = [];
+    shortagesBySupplier[sup].push(item);
+  }
 
   // Calculate stats
   const aggregateTotalShortage = shortageItemsList.reduce((sum, item) => sum + item.qtyShort, 0);
@@ -202,84 +212,119 @@ export default function ShortageReportView({ orders, systemConfig, onReplenish, 
           </div>
         </div>
 
-        {/* Listing Table representation */}
-        <div className="overflow-x-auto border border-slate-50 rounded-lg text-xs">
-          <table className="w-full text-left text-slate-600 min-w-[800px]">
-            <thead className="bg-slate-50 border-b border-slate-100 text-slate-700">
-              <tr>
-                <th className="p-3 font-semibold">流向分店</th>
-                <th className="p-3 font-semibold">采购合同号 / 货号</th>
-                <th className="p-3 font-semibold">货品明细</th>
-                <th className="p-3 font-semibold">型号规格</th>
-                <th className="p-3 font-semibold text-center font-mono">原预采购量</th>
-                <th className="p-3 font-semibold text-center font-mono">实到货件</th>
-                <th className="p-3 font-semibold text-rose-700 font-mono text-center bg-rose-50/20">欠货数量缺口</th>
-                <th className="p-3 font-semibold">配套生产商</th>
-                <th className="p-3 font-semibold text-right">协同控制方案</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredShortages.map(item => {
-                const isUnderDeficit = item.qtyShort > 0;
-                return (
-                  <tr key={item.id} className={`hover:bg-slate-50/30 transition-colors ${
-                    isUnderDeficit ? 'bg-rose-50/5' : ''
-                  }`}>
-                    <td className="p-3">
-                      <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded">
-                        {item.branchName}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <div className="font-mono font-medium text-slate-900">{item.orderNo}</div>
-                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">CODE: {item.productCode}</div>
-                    </td>
-                    <td className="p-3 font-bold text-slate-900">{item.productName}</td>
-                    <td className="p-3 text-slate-500 font-medium">{item.specs}</td>
-                    <td className="p-3 text-center font-mono">{item.quantity}</td>
-                    <td className="p-3 text-center text-slate-500 font-mono">{item.received}</td>
-                    <td className={`p-3 text-center font-bold font-mono ${
-                      isUnderDeficit ? 'bg-rose-50 text-rose-600' : 'text-slate-400 font-normal'
-                    }`}>
-                      {item.qtyShort}
-                    </td>
-                    <td className="p-3 text-slate-500 font-semibold">{item.supplier}</td>
-                    <td className="p-3 text-right">
-                      {isUnderDeficit ? (
-                        <button
-                          type="button"
-                          onClick={() => handlePerformReplenish(item)}
-                          disabled={isReplenishingId === item.id}
-                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold rounded text-[11px] inline-flex items-center gap-1 cursor-pointer shadow-sm transition-all"
-                          title="一键根据当前欠货值克隆下达到前台审核"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 ${isReplenishingId === item.id ? 'animate-spin' : ''}`} />
-                          <span>一键补货 ({item.qtyShort}件)</span>
-                        </button>
-                      ) : (
-                        <span className="text-[10px] text-green-600 font-semibold bg-green-50 px-2 py-0.5 rounded-full inline-block">
-                          履约妥协 ✓
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+        {/* Listing Grouped by Supplier */}
+        {filteredShortages.length === 0 ? (
+          <div className="overflow-x-auto border border-slate-50 rounded-lg text-xs p-12 text-center text-slate-400 bg-white">
+            <CheckCircle className="w-10 h-10 text-slate-200 mx-auto mb-2 stroke-[1.2]" />
+            <p className="font-semibold text-slate-700 text-xs">没有检索到符合过滤限制的欠款商品！</p>
+            <p className="text-[10px] text-slate-400 mt-1">
+              所有的商品预约、到港核对，均处于完好的高水准平衡。
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {Object.entries(shortagesBySupplier).map(([supplier, items]) => {
+              const isCollapsed = !!collapsedSuppliers[supplier];
+              const totalItemsCount = items.length;
+              const totalQtyDeficit = items.reduce((sum, item) => sum + item.qtyShort, 0);
 
-              {filteredShortages.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400">
-                    <CheckCircle className="w-10 h-10 text-slate-200 mx-auto mb-2 stroke-[1.2]" />
-                    <p className="font-semibold text-slate-700 text-xs">没有检索到符合过滤限制的欠款商品！</p>
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      所有的商品预约、到港核对，均处于完好的高水准平衡。
-                    </p>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              return (
+                <div key={supplier} className="border border-slate-100 rounded-lg overflow-hidden bg-white shadow-xs hover:shadow-sm transition-shadow">
+                  {/* Supplier Header Group */}
+                  <div 
+                    onClick={() => setCollapsedSuppliers(prev => ({ ...prev, [supplier]: !isCollapsed }))}
+                    className="p-3 bg-slate-50 border-b border-slate-100 hover:bg-slate-100/70 transition-colors flex items-center justify-between cursor-pointer select-none"
+                  >
+                    <div className="flex items-center gap-2">
+                      {isCollapsed ? (
+                        <ChevronDown className="w-4 h-4 text-slate-500" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4 text-slate-500" />
+                      )}
+                      <span className="font-extrabold text-slate-800 text-xs md:text-sm">🏭 {supplier}</span>
+                      <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200/50">
+                        {totalItemsCount} 种商品
+                      </span>
+                      <span className="bg-rose-50 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded border border-rose-205">
+                        待补缺口: {totalQtyDeficit} 件
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">
+                      {isCollapsed ? '点击展开查看该供应商下所有欠货明细' : '点击折叠收起'}
+                    </span>
+                  </div>
+
+                  {/* Supplier Detail Table */}
+                  {!isCollapsed && (
+                    <div className="overflow-x-auto text-xs">
+                      <table className="w-full text-left text-slate-600 min-w-[800px]">
+                        <thead className="bg-slate-50 border-b border-slate-100 text-slate-700 font-semibold text-[10px]">
+                          <tr>
+                            <th className="p-3 font-semibold">流向分店</th>
+                            <th className="p-3 font-semibold">采购合同号 / 货号</th>
+                            <th className="p-3 font-semibold">货品明细</th>
+                            <th className="p-3 font-semibold">型号规格</th>
+                            <th className="p-3 font-semibold text-center font-mono">原预采购量</th>
+                            <th className="p-3 font-semibold text-center font-mono">实到货件</th>
+                            <th className="p-3 font-semibold text-rose-700 font-mono text-center bg-rose-50/20">欠货数量缺口</th>
+                            <th className="p-3 font-semibold text-right">协同控制方案</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {items.map(item => {
+                            const isUnderDeficit = item.qtyShort > 0;
+                            return (
+                              <tr key={item.id} className={`hover:bg-slate-50/30 transition-colors ${
+                                isUnderDeficit ? 'bg-rose-50/5' : ''
+                              }`}>
+                                <td className="p-3">
+                                  <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded">
+                                    {item.branchName}
+                                  </span>
+                                </td>
+                                <td className="p-3">
+                                  <div className="font-mono font-medium text-slate-900">{item.orderNo}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">CODE: {item.productCode}</div>
+                                </td>
+                                <td className="p-3 font-bold text-slate-900">{item.productName}</td>
+                                <td className="p-3 text-slate-500 font-medium">{item.specs}</td>
+                                <td className="p-3 text-center font-mono">{item.quantity}</td>
+                                <td className="p-3 text-center text-slate-500 font-mono">{item.received}</td>
+                                <td className={`p-3 text-center font-bold font-mono ${
+                                  isUnderDeficit ? 'bg-rose-50 text-rose-600' : 'text-slate-400 font-normal'
+                                }`}>
+                                  {item.qtyShort}
+                                </td>
+                                <td className="p-3 text-right">
+                                  {isUnderDeficit ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePerformReplenish(item)}
+                                      disabled={isReplenishingId === item.id}
+                                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold rounded text-[11px] inline-flex items-center gap-1 cursor-pointer shadow-sm transition-all whitespace-nowrap"
+                                      title="一键根据当前欠货值克隆下达到前台审核"
+                                    >
+                                      <RefreshCw className={`w-3.5 h-3.5 ${isReplenishingId === item.id ? 'animate-spin' : ''}`} />
+                                      <span>一键补货 ({item.qtyShort}件)</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] text-green-600 font-semibold bg-green-50 px-2 py-0.5 rounded-full inline-block">
+                                      履约妥协 ✓
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

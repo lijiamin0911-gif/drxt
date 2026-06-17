@@ -18,7 +18,8 @@ import {
   Plus,
   Trash2,
   AlertTriangle,
-  X
+  X,
+  Building
 } from 'lucide-react';
 import { Order, PurchaseOrder, User, Product, Supplier } from '../types';
 import { DbService } from '../lib/dbService';
@@ -187,6 +188,7 @@ export default function PurchasingView({
   const [newRemarkText, setNewRemarkText] = useState('');
   const [poRemarks, setPoRemarks] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedSupplierForDrilldown, setSelectedSupplierForDrilldown] = useState<string | null>(null);
 
   // Warehouse extra replenishment buffer quantities (orderId -> additional stock amount)
   const [extraReplenishQty, setExtraReplenishQty] = useState<{ [orderId: string]: string }>({});
@@ -690,30 +692,30 @@ export default function PurchasingView({
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Build control card */}
-              <div className="bg-white p-4 md:p-6 border border-slate-100 rounded-xl shadow-sm h-fit space-y-4 lg:col-span-1">
+              <div className="bg-white p-4 md:p-6 border border-slate-100 rounded-xl shadow-sm h-fit space-y-4 lg:col-span-1 text-left">
                 <div className="flex items-center gap-2 text-blue-600">
                   <PlusSquare className="w-5 h-5" />
                   <h3 className="font-semibold text-slate-800 text-sm md:text-base">合并生成最终采购合同</h3>
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed">
+                <p className="text-xs text-slate-400 leading-relaxed">
                   选择右侧列表中所需提报的订货单行。系统会自动按照商品所配置的<strong>【目标供应商/生产厂商】</strong>自动分解，在保存时打包生成格式标准化的独立采购单合约。
                 </p>
 
-                <div className="pt-2 border-t border-slate-50 space-y-4">
-                  <div className="flex items-center justify-between text-xs font-medium">
+                <div className="pt-2 border-t border-slate-100 space-y-4">
+                  <div className="flex items-center justify-between text-xs font-semibold">
                     <span className="text-slate-600">当前已勾选：</span>
-                    <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded font-mono">
+                    <span className="bg-blue-50 text-blue-700 font-extrabold px-2 py-0.5 rounded font-mono">
                       {selectedOrderIds.length} 笔订单
                     </span>
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-xs font-medium text-slate-700">采购备注</label>
+                    <label className="block text-xs font-semibold text-slate-700">采购备注</label>
                     <textarea
                       placeholder="选填。例如：急件请核对批次或附注合同约定条款等"
                       value={poRemarks}
                       onChange={e => setPoRemarks(e.target.value)}
-                      className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 bg-slate-50 h-20 resize-none"
+                      className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 bg-slate-50 h-20 resize-none focus:outline-none"
                     />
                   </div>
 
@@ -722,7 +724,7 @@ export default function PurchasingView({
                       <button
                         type="button"
                         onClick={selectAllPendingItems}
-                        className="flex-1 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                        className="flex-1 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                       >
                         {selectedOrderIds.length === pendingPurchaseItems.length ? '取消全选' : '整单全选'}
                       </button>
@@ -730,7 +732,7 @@ export default function PurchasingView({
                         type="button"
                         onClick={handleBuildPOs}
                         disabled={selectedOrderIds.length === 0 || isGenerating}
-                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors cursor-pointer disabled:bg-blue-400 shadow-sm"
+                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer disabled:bg-blue-400 shadow-sm"
                       >
                         {isGenerating ? '正在生成...' : '立即生成采购合同'}
                       </button>
@@ -740,7 +742,7 @@ export default function PurchasingView({
                       <button
                         type="button"
                         onClick={handleBatchCancelOrders}
-                        className="w-full py-2 bg-rose-55 border border-rose-200 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 shadow-xs bg-rose-50/50"
+                        className="w-full py-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm"
                       >
                         <Trash2 className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
                         <span>批量注销/取消已选 ({selectedOrderIds.length} 笔)</span>
@@ -750,85 +752,151 @@ export default function PurchasingView({
                 </div>
               </div>
 
-              {/* Items directory grouped by supplier */}
-              <div className="lg:col-span-2 space-y-5 text-xs text-left">
-                {Object.entries(groupedPurchaseItemsBySupplier).map(([supplier, entries]) => {
+              {/* Items directory grouped by supplier: Cards & Drilldowns */}
+              <div className="lg:col-span-2 space-y-6 text-xs text-left">
+                {/* 1. Supplier Summary Cards Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(groupedPurchaseItemsBySupplier).map(([supplier, entries]) => {
+                    const skuCount = new Set(entries.map(o => o.productCode)).size;
+                    const totalQty = entries.reduce((sum, o) => sum + o.quantity, 0);
+                    const branchCount = new Set(entries.map(o => o.branchName)).size;
+                    
+                    const isSelected = selectedSupplierForDrilldown === supplier || (!selectedSupplierForDrilldown && Object.keys(groupedPurchaseItemsBySupplier)[0] === supplier);
+                    const isGroupSelected = entries.every(o => selectedOrderIds.includes(o.id));
+                    const selectedInGroup = entries.filter(o => selectedOrderIds.includes(o.id));
+
+                    // Aesthetics based on name
+                    const norm = supplier.toLowerCase();
+                    const icon = norm.includes('五金') || norm.includes('铁') ? '🔩' : (norm.includes('电器') || norm.includes('光电') ? '⚡' : '🏭');
+                    
+                    return (
+                      <div 
+                        key={supplier}
+                        onClick={() => setSelectedSupplierForDrilldown(supplier)}
+                        className={`p-4 rounded-xl border transition-all cursor-pointer select-none bg-white relative flex flex-col justify-between min-h-[140px] ${
+                          isSelected 
+                            ? 'border-blue-600 ring-2 ring-blue-500/10 shadow-md' 
+                            : 'border-slate-200/80 hover:border-slate-355 hover:shadow-2xs shadow-3xs'
+                        }`}
+                      >
+                        {isSelected && (
+                          <div className="absolute top-3 right-3 flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                          </div>
+                        )}
+
+                        <div className="space-y-3 font-sans text-left">
+                          <div className="flex items-start gap-2">
+                            <span className="text-xl shrink-0 mt-0.5">{icon}</span>
+                            <div>
+                              <h4 className="font-extrabold text-slate-900 text-xs md:text-sm leading-tight pr-4">
+                                {supplier}
+                              </h4>
+                              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                                配套首选生产制造厂商
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Stats Bento */}
+                          <div className="grid grid-cols-3 gap-1 bg-slate-50 p-2 rounded-lg text-center font-sans">
+                            <div className="space-y-0.5">
+                              <span className="text-[9px] text-slate-400 block font-medium">货品品类</span>
+                              <strong className="text-slate-800 text-[11px] md:text-xs font-bold font-mono">{skuCount} 种</strong>
+                            </div>
+                            <div className="space-y-0.5 border-x border-slate-200/60">
+                              <span className="text-[9px] text-slate-400 block font-medium">待开单总量</span>
+                              <strong className="text-slate-800 text-[11px] md:text-xs font-bold font-mono">{totalQty} 件</strong>
+                            </div>
+                            <div className="space-y-0.5">
+                              <span className="text-[9px] text-slate-400 block font-medium">涉及分店</span>
+                              <strong className="text-slate-800 text-[11px] md:text-xs font-bold font-mono">{branchCount} 家</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-1 animate-fadeIn" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSupplierForDrilldown(supplier)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200 shadow-3xs'
+                                : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span>🔍 钻取明细 ({entries.length} 笔)</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleBuildSupplierPO(supplier, entries)}
+                            disabled={selectedInGroup.length === 0 || isGenerating}
+                            className="px-2 py-1 bg-indigo-600 text-white rounded-lg text-[10px] font-extrabold hover:bg-indigo-700 shadow-3xs transition-all cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
+                          >
+                            <span>🏭 供方批下单</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 2. Drill-down Area (钻取及分店详情独立展示区) */}
+                {(() => {
+                  const currentSupplier = selectedSupplierForDrilldown || (Object.keys(groupedPurchaseItemsBySupplier).length > 0 ? Object.keys(groupedPurchaseItemsBySupplier)[0] : null);
+                  if (!currentSupplier) return null;
+
+                  const entries = groupedPurchaseItemsBySupplier[currentSupplier] || [];
                   const isGroupSelected = entries.every(o => selectedOrderIds.includes(o.id));
                   const selectedInGroup = entries.filter(o => selectedOrderIds.includes(o.id));
                   const uncheckedInGroup = entries.filter(o => !selectedOrderIds.includes(o.id));
-                  
-                  // Decide template aesthetics depending on the factory category to reflect: "不同厂家生产的产品是不同的，所以下单页面肯定也是不同的"
-                  const getSupplierFactoryTemplate = (supplierName: string) => {
-                    const norm = supplierName.toLowerCase();
-                    if (norm.includes('五金') || norm.includes('铁') || norm.includes('金属') || norm.includes('塑胶') || norm.includes('模具')) {
-                      return {
-                        title: "🔩 重工高碳钢锻造及模具成型排产合同格式",
-                        sub: "（适用于金属构件、钣金、塑胶模具等重工类制造分厂）",
-                        cardBg: "border-slate-300 bg-gradient-to-br from-slate-50 to-slate-100/50",
-                        headerBg: "bg-slate-700 text-slate-100",
-                        badgeBg: "bg-slate-800 text-slate-100",
-                        icon: "🔩"
-                      };
-                    } else if (norm.includes('电器') || norm.includes('电子') || norm.includes('灯') || norm.includes('线') || norm.includes('光电') || norm.includes('芯片')) {
-                      return {
-                        title: "🌐 精密光电集成及电子电器提料装配合同格式",
-                        sub: "（适用于精密元器件、电子控制板、电线电缆类高新科技分厂）",
-                        cardBg: "border-blue-200 bg-gradient-to-br from-blue-50/10 to-indigo-50/10",
-                        headerBg: "bg-blue-800 text-blue-50",
-                        badgeBg: "bg-blue-600 text-white",
-                        icon: "⚡"
-                      };
-                    } else {
-                      return {
-                        title: "📦 工业装配大宗标准重载装载投产单格式",
-                        sub: "（适用于通用机械结构、箱体包装件、综合精细装配传统制造分厂）",
-                        cardBg: "border-indigo-200 bg-white",
-                        headerBg: "bg-indigo-900 text-indigo-50",
-                        badgeBg: "bg-indigo-600 text-white",
-                        icon: "🏭"
-                      };
-                    }
-                  };
 
-                  const temp = getSupplierFactoryTemplate(supplier);
+                  // Group current supplier's orders by branch
+                  const ordersByBranch: { [branch: string]: Order[] } = {};
+                  for (const order of entries) {
+                    if (!ordersByBranch[order.branchName]) {
+                      ordersByBranch[order.branchName] = [];
+                    }
+                    ordersByBranch[order.branchName].push(order);
+                  }
 
                   return (
-                    <div 
-                      key={supplier} 
-                      className={`border rounded-xl shadow-md transition-shadow hover:shadow-lg overflow-hidden flex flex-col ${temp.cardBg}`}
-                    >
-                      {/* Customized Factory Header Band */}
-                      <div className={`px-4 py-3 flex flex-wrap items-center justify-between gap-2 shadow-sm ${temp.headerBg}`}>
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-black tracking-tight">{temp.icon} {supplier}</span>
-                            <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.2 bg-white/15 text-white rounded">
-                              {entries.length} 款待买
+                    <div className="border border-blue-105 rounded-2xl shadow-md overflow-hidden bg-white animate-fadeIn font-sans">
+                      {/* Drilldown Header */}
+                      <div className="bg-gradient-to-r from-blue-900 to-indigo-950 p-4 text-white flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-0.5 text-left">
+                          <h4 className="font-extrabold text-sm md:text-base flex items-center gap-1.5 flex-wrap">
+                            <span>🔍 钻取工作台:</span>
+                            <span className="bg-white/10 px-2 py-0.5 rounded text-blue-100 font-extrabold uppercase text-xs">
+                              {currentSupplier}
                             </span>
-                          </div>
-                          <p className="text-[10px] opacity-90 font-medium">
-                            {temp.title} <span className="opacity-75">{temp.sub}</span>
+                          </h4>
+                          <p className="text-[10px] text-blue-100/70 font-medium">
+                            对该厂家下所有分店的申报计划进行查看、汇总、一键补货和会签直发。
                           </p>
                         </div>
-                        
+
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => handleSelectGroup(supplier)}
-                            className="bg-white/20 hover:bg-white/30 text-white font-extrabold px-2.5 py-1 rounded text-[10px] transition-colors cursor-pointer"
+                            onClick={() => handleSelectGroup(currentSupplier)}
+                            className="bg-white/15 hover:bg-white/25 text-white border border-white/20 font-black px-2.5 py-1 rounded text-[10px] transition-all cursor-pointer"
                           >
-                            {isGroupSelected ? '❌ 取消该厂全选' : '✔️ 一键选中全厂'}
+                            {isGroupSelected ? '❌ 取消全厂勾选' : '✔️ 一键勾选全厂'}
                           </button>
                         </div>
                       </div>
 
                       {/* Warnings & Advice Area to prevent missed orders */}
-                      <div className="p-3 border-b border-dashed border-slate-100 bg-white space-y-2">
+                      <div className="p-3 bg-slate-50 border-b border-slate-100 space-y-2 text-left">
                         {uncheckedInGroup.length > 0 ? (
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-amber-900 text-[11px] font-bold">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-amber-900 text-[11px] font-bold animate-fadeIn">
                             <div className="flex items-center gap-1.5">
                               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 animate-bounce" />
-                              <span>⚠️ [ 漏下单预警 ]：当前该厂家共有 <strong className="text-rose-600 text-xs font-mono">{uncheckedInGroup.length}</strong> 款分店提报的商品尚未勾选，未生成采购合同！</span>
+                              <span>⚠️ [ 漏下单预警 ]：当前该厂家共有 <strong className="text-rose-600 text-xs font-mono">{uncheckedInGroup.length}</strong> 款分店提报的商品尚未勾选，未合并下单！</span>
                             </div>
                             <button
                               type="button"
@@ -836,7 +904,7 @@ export default function PurchasingView({
                                 const allGroupIds = entries.map(o => o.id);
                                 setSelectedOrderIds(Array.from(new Set([...selectedOrderIds, ...allGroupIds])));
                               }}
-                              className="sm:ml-auto underline text-blue-700 hover:text-blue-900 cursor-pointer font-extrabold flex items-center gap-0.5 whitespace-nowrap"
+                              className="sm:ml-auto underline text-blue-700 hover:text-blue-950 cursor-pointer font-extrabold flex items-center gap-0.5 whitespace-nowrap"
                             >
                               👉 点击一键全选该厂商品，避免漏单
                             </button>
@@ -844,304 +912,277 @@ export default function PurchasingView({
                         ) : (
                           <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-lg text-emerald-800 text-[11px] font-bold">
                             <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>完美覆盖：该厂待派送的所有分店申领货项已被 <span className="bg-emerald-600 text-white font-mono rounded px-1 text-[9px] py-0.2">100% 勾选</span> 完毕，无采购遗漏隐患！</span>
+                            <span>完美覆盖：该厂待派送的所有分店申领货项已被 <span className="bg-emerald-600 text-white font-mono rounded px-1.5 text-[9px] py-0.2">100% 勾选</span> 完毕，无采购遗漏隐患！</span>
                           </div>
                         )}
-
-                        {/* Interactive Hint */}
-                        <div className="text-[10px] text-slate-500 font-medium bg-slate-50 px-2.5 py-1.5 rounded border border-slate-150 flex items-center gap-1.5">
-                          <span className="text-amber-500">💡</span>
-                          <span><strong>下单补货协同机制：</strong> 提单前请核对仓库实物水位，可在下方输入 <strong>【指定增加仓库补货量】</strong>，系统会自动将分店提报需求量与仓库备货合并，一次性合并派单投产。</span>
-                        </div>
                       </div>
 
-                      {/* Supplier-Specific Main Grid */}
-                      <div className="p-3 bg-white overflow-x-auto">
-                        <table className="w-full text-left text-xs min-w-[700px]">
-                          <thead>
-                            <tr className="text-slate-400 border-b border-slate-50 text-[10px] font-bold">
-                              <th className="py-1.5 w-10 text-center">状态</th>
-                              <th className="py-1.5">申请分店</th>
-                              <th className="py-1.5">申领商品明细</th>
-                              <th className="py-1.5">规格/型号</th>
-                              <th className="py-1.5 text-center bg-blue-50/30 text-blue-900 border-x border-slate-100">分店订单量</th>
-                              <th className="py-1.5 text-center bg-amber-50/50 text-amber-900">📦 仓库库存确认 & 补货加注</th>
-                              <th className="py-1.5 text-center bg-indigo-50 text-indigo-950 font-extrabold border-x border-slate-100">最终一键投产量</th>
-                              {showPrices && (
-                                <>
-                                  <th className="py-1.5 text-center bg-teal-50 text-teal-950 font-extrabold border-r border-slate-100 w-24">上次价格 (¥)</th>
-                                  <th className="py-1.5 text-center bg-rose-50 text-rose-950 font-extrabold border-r border-slate-100 w-24">本次价格 (¥)</th>
-                                </>
-                              )}
-                              <th className="py-1.5 text-center">指派跟单 (可一键调单)</th>
-                              <th className="py-1.5 border-r border-slate-100">预约提单日期</th>
-                              <th className="py-1.5 text-center w-16">单挑管理</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {entries.map(order => {
-                              const isChecked = selectedOrderIds.includes(order.id);
-                              
-                              // Compute stable dynamic mock stock based on code hashing to reflect real stock check
-                              const hash = order.productCode.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-                              const mockStock = (hash * 13) % 45; // Stable mock stockpile
-                              const isStockLow = mockStock < 15;
+                      {/* Split list by branch */}
+                      <div className="p-4 space-y-4 max-h-[800px] overflow-y-auto">
+                        {Object.entries(ordersByBranch).map(([branchName, branchOrders]) => {
+                          const branchTotalQty = branchOrders.reduce((sum, o) => sum + o.quantity, 0);
+                          return (
+                            <div key={branchName} className="border border-slate-200/85 rounded-xl overflow-hidden bg-white shadow-3xs">
+                              {/* Store header card */}
+                              <div className="bg-slate-50/90 px-3 py-2 border-b border-slate-150 flex items-center justify-between text-xs font-bold text-slate-800">
+                                <div className="flex items-center gap-1.5">
+                                  <span>🏪</span>
+                                  <span className="font-extrabold text-slate-800 text-xs md:text-sm bg-slate-200 px-2 py-0.5 rounded">{branchName}分店</span>
+                                  <span className="text-[10px] text-slate-400 font-normal">
+                                    提交了该供应商商品：{branchOrders.length} 款
+                                  </span>
+                                </div>
+                                <div className="bg-blue-50 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-150">
+                                  分店下达总量：{branchTotalQty} 件
+                                </div>
+                              </div>
 
-                              const extraStr = extraReplenishQty[order.id] || '';
-                              const extraVal = parseInt(extraStr, 10) || 0;
-                              const finalTotalQty = order.quantity + extraVal;
-
-                              return (
-                                <tr 
-                                  key={order.id} 
-                                  onClick={() => handleSelectToggle(order.id)}
-                                  className={`group transition-all ${
-                                    isChecked 
-                                      ? 'bg-blue-50/25 border-l-2 border-blue-600 font-medium' 
-                                      : 'hover:bg-slate-50/30'
-                                  }`}
-                                >
-                                  <td className="py-2.5 text-center" onClick={e => e.stopPropagation()}>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSelectToggle(order.id)}
-                                      className="text-slate-400 hover:text-blue-600 transition-transform active:scale-95"
-                                      title={isChecked ? '取消勾选' : '勾选此项加入投产单'}
-                                    >
-                                      {isChecked ? (
-                                        <CheckSquare className="w-4 h-4 text-blue-600" />
-                                      ) : (
-                                        <Square className="w-4 h-4" />
-                                      )}
-                                    </button>
-                                  </td>
-                                  
-                                  <td className="py-2.5 font-extrabold text-slate-800">
-                                    <span className="bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[10px]">
-                                      {order.branchName}
-                                    </span>
-                                  </td>
-                                  
-                                  <td className="py-2.5">
-                                    <span className="font-bold text-slate-900 block">{order.productName}</span>
-                                    <span className="text-[10px] text-slate-400 font-mono block mt-0.5">编码: {order.productCode}</span>
-                                    {order.isUrgent && (
-                                      <span className="inline-block bg-rose-100 text-rose-700 text-[9px] px-1.5 py-0.5 rounded font-black border border-rose-200 animate-pulse mt-0.5">
-                                        ⚡ 加急申报件
-                                      </span>
-                                    )}
-
-                                    {/* Collaborative integrated remark visualization */}
-                                    <div className="mt-1.5 flex flex-wrap gap-1 items-center" onClick={e => e.stopPropagation()}>
-                                      {order.remark ? (
+                              {/* Branch specific orders table */}
+                              <div className="overflow-x-auto text-xs">
+                                <table className="w-full text-left min-w-[700px]">
+                                  <thead>
+                                    <tr className="text-slate-400 border-b border-slate-100 text-[9px] font-extrabold uppercase">
+                                      <th className="py-2 px-3 w-10 text-center">状态</th>
+                                      <th className="py-2 px-3">申领商品明细</th>
+                                      <th className="py-2 px-3">型号规格</th>
+                                      <th className="py-2 px-3 text-center bg-blue-50/20 text-blue-900">分店订单量</th>
+                                      <th className="py-2 px-3 text-center bg-amber-50/30 text-amber-900 w-44">📦 仓库库存确认 & 补货加注</th>
+                                      <th className="py-2 px-3 text-center bg-indigo-50 text-indigo-950 font-extrabold">最终一键投产量</th>
+                                      {showPrices && (
                                         <>
-                                          {order.remarkRole === 'branch' && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                              🏪 【分店备注】: {order.remark}
-                                            </span>
-                                          )}
-                                          {order.remarkRole === 'receptionist' && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                              🎨 【前台备注】: {order.remark}
-                                            </span>
-                                          )}
-                                          {order.remarkRole === 'purchasing' && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 font-medium">
-                                              🏭 【我的备注】: {order.remark}
-                                            </span>
-                                          )}
-                                          {!order.remarkRole && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                                              🏪 【分店备注】: {order.remark}
-                                            </span>
-                                          )}
+                                          <th className="py-2 px-3 text-center bg-teal-50 text-teal-950 font-extrabold w-22">上次价格</th>
+                                          <th className="py-2 px-3 text-center bg-rose-50 text-rose-950 font-extrabold w-22">本次价格</th>
                                         </>
-                                      ) : (
-                                        <span className="text-[10px] text-slate-400 font-normal italic">暂无留言备注</span>
                                       )}
+                                      <th className="py-2 px-3 text-center">指派跟单 (可提单)</th>
+                                      <th className="py-2 px-3 text-center w-16">单挑管理</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {branchOrders.map(order => {
+                                      const isChecked = selectedOrderIds.includes(order.id);
+                                      const hash = order.productCode.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+                                      const mockStock = (hash * 13) % 45; 
+                                      const isStockLow = mockStock < 15;
 
-                                      <button
-                                        type="button"
-                                        onClick={(ev) => {
-                                          ev.stopPropagation();
-                                          setEditingRemarkOrder(order);
-                                          setNewRemarkText(order.remark || '');
-                                        }}
-                                        className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold border border-blue-100 cursor-pointer"
-                                        title="对订单核实、加购流转时增加文字标记"
-                                      >
-                                        📝 批注/修改备注
-                                      </button>
-                                    </div>
+                                      const extraStr = extraReplenishQty[order.id] || '';
+                                      const extraVal = parseInt(extraStr, 10) || 0;
+                                      const finalTotalQty = order.quantity + extraVal;
 
-                                    {/* Special-product Factory Direct Dispatch Review and Status Flag */}
-                                    {order.orderType === 'custom' && ['直发', '厂家直发', '厂里直发', '工厂直发'].some(k => (order.remark || '').includes(k)) && (
-                                      <div className="mt-1.5 p-1.5 bg-purple-50 border border-purple-200 rounded-lg space-y-1 w-fit" onClick={e => e.stopPropagation()}>
-                                        <div className="text-[9px] font-bold text-purple-700 flex items-center gap-1">
-                                          <span>🔮 新品直发会签审核判决：</span>
-                                          {!order.directDispatchApproved || order.directDispatchApproved === 'pending' ? (
-                                            <span className="px-1 py-0.2 bg-purple-100 text-purple-800 rounded font-black animate-pulse">待决定</span>
-                                          ) : order.directDispatchApproved === 'approved' ? (
-                                            <span className="px-1 py-0.2 bg-emerald-100 text-emerald-800 rounded font-black">已通过</span>
-                                          ) : (
-                                            <span className="px-1 py-0.2 bg-rose-100 text-rose-800 rounded font-black">已否决</span>
+                                      return (
+                                        <tr 
+                                          key={order.id}
+                                          onClick={() => handleSelectToggle(order.id)}
+                                          className={`group transition-all cursor-pointer ${
+                                            isChecked 
+                                              ? 'bg-blue-50/15 font-medium' 
+                                              : 'hover:bg-slate-50/30'
+                                          }`}
+                                        >
+                                          {/* Checkbox */}
+                                          <td className="py-2.5 px-3 text-center" onClick={e => e.stopPropagation()}>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleSelectToggle(order.id)}
+                                              className="text-slate-400 hover:text-blue-600 transition-transform active:scale-95 cursor-pointer"
+                                            >
+                                              {isChecked ? (
+                                                <CheckSquare className="w-4 h-4 text-blue-600" />
+                                              ) : (
+                                                <Square className="w-4 h-4" />
+                                              )}
+                                            </button>
+                                          </td>
+
+                                          {/* Item details */}
+                                          <td className="py-2.5 px-3 text-left">
+                                            <span className="font-bold text-slate-900 block">{order.productName}</span>
+                                            <span className="text-[9px] text-slate-400 font-mono block mt-0.5">CODE: {order.productCode}</span>
+                                            
+                                            {order.isUrgent && (
+                                              <span className="inline-block bg-rose-100 text-rose-700 text-[8px] px-1.5 py-0.2 rounded font-black border border-rose-200 mt-0.5 animate-pulse">
+                                                ⚡ 加急申报
+                                              </span>
+                                            )}
+
+                                            {/* Remark view */}
+                                            <div className="mt-1 flex flex-wrap gap-1 items-center" onClick={e => e.stopPropagation()}>
+                                              {order.remark ? (
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-850 border border-purple-200">
+                                                  🏪 【分店备注】: {order.remark}
+                                                </span>
+                                              ) : (
+                                                <span className="text-[9px] text-slate-400 font-normal italic">暂无留言备注</span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setEditingRemarkOrder(order);
+                                                  setNewRemarkText(order.remark || '');
+                                                }}
+                                                className="px-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 font-bold rounded text-[8px] cursor-pointer"
+                                              >
+                                                批注
+                                              </button>
+                                            </div>
+
+                                            {/* Special direct approval */}
+                                            {order.orderType === 'custom' && ['直发', '厂家直发', '厂里直发', '工厂直发'].some(k => (order.remark || '').includes(k)) && (
+                                              <div className="mt-1.5 p-1 bg-purple-50 border border-purple-150 rounded space-y-1 w-fit" onClick={e => e.stopPropagation()}>
+                                                <div className="text-[8px] font-bold text-purple-700 flex items-center gap-1">
+                                                  <span>直发会签审核判决：</span>
+                                                  {!order.directDispatchApproved || order.directDispatchApproved === 'pending' ? (
+                                                    <span className="px-1 bg-purple-100 text-purple-800 rounded font-black animate-pulse">待决</span>
+                                                  ) : order.directDispatchApproved === 'approved' ? (
+                                                    <span className="px-1 bg-emerald-100 text-emerald-800 rounded font-black">通过</span>
+                                                  ) : (
+                                                    <span className="px-1 bg-rose-100 text-rose-800 rounded font-black">否决</span>
+                                                  )}
+                                                </div>
+                                                {(!order.directDispatchApproved || order.directDispatchApproved === 'pending') && (
+                                                  <div className="flex gap-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleAuditDirectDispatch(order.id, true)}
+                                                      className="px-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[8px] font-extrabold rounded cursor-pointer"
+                                                    >
+                                                      同意
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleAuditDirectDispatch(order.id, false)}
+                                                      className="px-1 bg-rose-600 hover:bg-rose-700 text-white text-[8px] font-extrabold rounded cursor-pointer"
+                                                    >
+                                                      否决
+                                                    </button>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </td>
+
+                                          {/* Specs */}
+                                          <td className="py-2.5 px-3 text-slate-600 font-bold font-mono text-left">{order.specs}</td>
+
+                                          {/* Order quantity */}
+                                          <td className="py-2.5 px-3 text-center text-slate-800 font-black font-mono bg-blue-50/5">
+                                            {order.quantity}
+                                          </td>
+
+                                          {/* Stock and replenishment input */}
+                                          <td className="py-2.5 px-3 text-center bg-amber-50/5" onClick={e => e.stopPropagation()}>
+                                            <div className="flex items-center justify-center gap-1">
+                                              <span className={`w-1 h-1 rounded-full ${isStockLow ? 'bg-rose-500 animate-ping' : 'bg-emerald-500'}`}></span>
+                                              <span className={`text-[8px] font-extrabold ${isStockLow ? 'text-rose-600' : 'text-slate-400'}`}>
+                                                {isStockLow ? `仅剩 ${mockStock} 件` : `充足 (${mockStock})`}
+                                              </span>
+                                            </div>
+                                            
+                                            <div className="flex items-center justify-center gap-1 mt-1 max-w-[110px] mx-auto">
+                                              <input
+                                                type="number"
+                                                min="0"
+                                                placeholder="+ 补货量"
+                                                value={extraStr}
+                                                onChange={e => {
+                                                  const val = e.target.value;
+                                                  setExtraReplenishQty(prev => ({
+                                                    ...prev,
+                                                    [order.id]: val
+                                                  }));
+                                                }}
+                                                className="w-16 px-1 py-0.5 border border-amber-300 rounded text-center text-xs text-blue-600 font-extrabold font-mono bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                              />
+                                            </div>
+                                          </td>
+
+                                          {/* Result qty */}
+                                          <td className="py-2.5 px-3 text-center bg-indigo-50/15">
+                                            <span className="text-slate-500 font-mono text-[9px] block">
+                                              {order.quantity} + {extraVal}
+                                            </span>
+                                            <strong className={`font-mono text-xs block mt-0.5 ${isChecked ? 'text-indigo-600' : 'text-slate-700'}`}>
+                                              = {finalTotalQty} 件
+                                            </strong>
+                                          </td>
+
+                                          {/* Price comparison columns */}
+                                          {showPrices && (
+                                            <>
+                                              <td className="py-2.5 px-3 text-center bg-teal-50/10" onClick={e => e.stopPropagation()}>
+                                                <input
+                                                  type="number"
+                                                  min="0"
+                                                  step="0.01"
+                                                  value={order.previousPrice !== undefined ? order.previousPrice : ''}
+                                                  onChange={async (e) => {
+                                                    const prevVal = parseFloat(e.target.value) || 0;
+                                                    await DbService.updateOrderPrices(order.id, prevVal, order.currentPrice || 0, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
+                                                  }}
+                                                  placeholder="上次价 ¥"
+                                                  className="w-16 px-1 py-0.5 border border-teal-300 rounded text-center text-xs text-teal-800 font-bold bg-white font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                                />
+                                              </td>
+                                              <td className="py-2.5 px-3 text-center bg-rose-50/10" onClick={e => e.stopPropagation()}>
+                                                <input
+                                                  type="number"
+                                                  min="0"
+                                                  step="0.01"
+                                                  value={order.currentPrice !== undefined ? order.currentPrice : ''}
+                                                  onChange={async (e) => {
+                                                    const currVal = parseFloat(e.target.value) || 0;
+                                                    await DbService.updateOrderPrices(order.id, order.previousPrice || 0, currVal, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
+                                                  }}
+                                                  placeholder="本次价 ¥"
+                                                  className="w-16 px-1 py-0.5 border border-rose-300 rounded text-center text-xs text-rose-800 font-bold bg-white font-mono focus:outline-none focus:ring-1 focus:ring-rose-500"
+                                                />
+                                              </td>
+                                            </>
                                           )}
-                                        </div>
-                                        {(!order.directDispatchApproved || order.directDispatchApproved === 'pending') && (
-                                          <div className="flex gap-1">
+
+                                          {/* Scheduler */}
+                                          <td className="py-2.5 px-3 text-center" onClick={e => e.stopPropagation()}>
+                                            <select
+                                              value={order.merchandiserName || ''}
+                                              onChange={e => handleUpdateOrderMerchandiser(order.id, e.target.value)}
+                                              className="text-[9px] px-1 py-0.5 border border-slate-200 rounded text-slate-700 font-semibold focus:outline-none bg-white font-semibold"
+                                            >
+                                              <option value="">-- 指派采购 --</option>
+                                              {procurementStaff.map(u => (
+                                                <option key={u.id} value={u.username}>
+                                                  {u.username}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </td>
+
+                                          {/* Action */}
+                                          <td className="py-2.5 px-3 text-center" onClick={e => e.stopPropagation()}>
                                             <button
                                               type="button"
-                                              onClick={() => handleAuditDirectDispatch(order.id, true)}
-                                              className="px-1.5 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-extrabold rounded cursor-pointer"
+                                              onClick={() => handleSingleCancelOrder(order.id, order.orderNo, order.productName)}
+                                              className="px-1 bg-rose-50 hover:bg-rose-100 border border-rose-220 text-rose-600 rounded font-bold text-[9px] cursor-pointer"
                                             >
-                                              同意直发
+                                              撤单
                                             </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleAuditDirectDispatch(order.id, false)}
-                                              className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 text-white text-[9px] font-extrabold rounded cursor-pointer"
-                                            >
-                                              否决(改走仓库)
-                                            </button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-
-                                    {order.directDispatchApproved === 'approved' && (
-                                      <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded text-[10px] border border-emerald-250">
-                                        🚀 采购已会签核准：同意该新品流转直发
-                                      </div>
-                                    )}
-
-                                    {order.directDispatchApproved === 'rejected' && (
-                                      <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 text-rose-700 font-bold rounded text-[10px] border border-rose-250">
-                                        ❌ 采购已会签否决：拒绝直发设案 (改大货物配)
-                                      </div>
-                                    )}
-                                  </td>
-                                  
-                                  <td className="py-2.5 text-slate-600 font-bold font-mono">{order.specs}</td>
-                                  
-                                  {/* Original Demand Qty */}
-                                  <td className="py-2.5 text-center text-slate-800 font-black font-mono bg-blue-50/10 border-x border-slate-100">
-                                    {order.quantity}
-                                  </td>
-                                  
-                                  {/* Interactive Warehouse stock check & input replenishment buffer */}
-                                  <td className="py-2.5 text-center bg-amber-50/10 space-y-1" onClick={e => e.stopPropagation()}>
-                                    <div className="flex items-center justify-center gap-1">
-                                      <span className={`w-1.5 h-1.5 rounded-full ${isStockLow ? 'bg-rose-500 animate-ping' : 'bg-emerald-500'}`}></span>
-                                      <span className={`text-[9px] font-extrabold ${isStockLow ? 'text-rose-600' : 'text-slate-500'}`} title="这是系统自适应抓取的实物库存余量">
-                                        {isStockLow ? `🚨 仅剩 ${mockStock} 件 (促抓补)` : `库存充足 (${mockStock} 件)`}
-                                      </span>
-                                    </div>
-                                    
-                                    <div className="flex items-center justify-center gap-1 max-w-[120px] mx-auto">
-                                      <span className="text-[9px] font-bold text-slate-400">一键补仓:</span>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        placeholder="+ 件数"
-                                        value={extraStr}
-                                        onChange={e => {
-                                          const val = e.target.value;
-                                          setExtraReplenishQty(prev => ({
-                                            ...prev,
-                                            [order.id]: val
-                                          }));
-                                        }}
-                                        className="w-14 px-1 py-0.5 border border-amber-300 rounded text-center text-xs text-blue-600 font-extrabold font-mono bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                        title="如果仓库需要补足货架或备存，请输入需要额外加购的数量"
-                                      />
-                                    </div>
-                                  </td>
-
-                                  {/* Realtime aggregations */}
-                                  <td className="py-2.5 text-center bg-indigo-50/50 border-x border-slate-100">
-                                    <span className="text-slate-800 font-mono font-medium text-[10px] block">
-                                      {order.quantity} + {extraVal}
-                                    </span>
-                                    <strong className={`font-mono text-sm block mt-0.5 ${isChecked ? 'text-indigo-600 font-black' : 'text-slate-700'}`}>
-                                      = {finalTotalQty} 件
-                                    </strong>
-                                  </td>
-
-                                  {showPrices && (
-                                    <>
-                                      <td className="py-2.5 text-center bg-teal-50/20 px-1 border-r border-slate-100" onClick={e => e.stopPropagation()}>
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          value={order.previousPrice !== undefined ? order.previousPrice : ''}
-                                          onChange={async (e) => {
-                                            const prevVal = parseFloat(e.target.value) || 0;
-                                            await DbService.updateOrderPrices(order.id, prevVal, order.currentPrice || 0, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-                                          }}
-                                          placeholder="上次价 ¥"
-                                          className="w-18 px-1 py-0.5 border border-teal-300 rounded text-center text-xs text-teal-800 font-bold bg-white focus:outline-none focus:ring-1 focus:ring-teal-500 font-mono"
-                                        />
-                                      </td>
-                                      <td className="py-2.5 text-center bg-rose-50/20 px-1 border-r border-slate-100" onClick={e => e.stopPropagation()}>
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          value={order.currentPrice !== undefined ? order.currentPrice : ''}
-                                          onChange={async (e) => {
-                                            const currVal = parseFloat(e.target.value) || 0;
-                                            await DbService.updateOrderPrices(order.id, order.previousPrice || 0, currVal, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-                                          }}
-                                          placeholder="本次价 ¥"
-                                          className="w-18 px-1 py-0.5 border border-rose-300 rounded text-center text-xs text-rose-800 font-bold bg-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono"
-                                        />
-                                      </td>
-                                    </>
-                                  )}
-
-                                  {/* Merchandiser scheduler */}
-                                  <td className="py-2.5 text-center" onClick={e => e.stopPropagation()}>
-                                    <select
-                                      value={order.merchandiserName || ''}
-                                      onChange={e => handleUpdateOrderMerchandiser(order.id, e.target.value)}
-                                      className="text-[10px] px-1.5 py-0.5 border border-slate-200 rounded text-slate-700 font-medium focus:outline-none bg-white font-semibold"
-                                    >
-                                      <option value="">-- 指派跟单 --</option>
-                                      {procurementStaff.map(u => (
-                                        <option key={u.id} value={u.username}>
-                                          👤 {u.username}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </td>
-                                  
-                                  <td className="py-2.5 text-slate-450 font-mono text-[9px] border-r border-slate-100">
-                                    {new Date(order.createdAt).toLocaleDateString()}
-                                  </td>
-                                  <td className="py-2.5 text-center align-middle" onClick={e => e.stopPropagation()}>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSingleCancelOrder(order.id, order.orderNo, order.productName)}
-                                      className="px-1.5 py-0.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded font-bold text-[10px] transition-colors cursor-pointer"
-                                      title="个别退单/作废此项"
-                                    >
-                                      🚫 撤单
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
 
-                      {/* Manufacturer specific direct confirmations actions */}
+                      {/* Supplier direct confirmations footer actions */}
                       <div className="bg-slate-50 px-4 py-3 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3">
-                        <div className="text-[10px] font-bold text-slate-500">
+                        <div className="text-[10px] font-bold text-slate-500 text-left">
                           {selectedInGroup.length > 0 ? (
                             <span className="text-blue-700">
-                              ℹ️ 本分厂当前已勾选 <strong>{selectedInGroup.length}</strong> 款进行投产排单 (包含补货，合计：
+                              ℹ️ 本厂当前已勾选 <strong>{selectedInGroup.length}</strong> 款进行投产 (包含补货，合计：
                               <strong>
                                 {selectedInGroup.reduce((acc, order) => {
                                   const addOn = parseInt(extraReplenishQty[order.id], 10) || 0;
@@ -1150,25 +1191,24 @@ export default function PurchasingView({
                               </strong> 件)
                             </span>
                           ) : (
-                            <span className="text-slate-400">⚠️ 未选择任何商品行，无法生成排产合同</span>
+                            <span className="text-rose-600">⚠️ 未选择任何商品行，无法生成排产合同</span>
                           )}
                         </div>
 
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => handleBuildSupplierPO(supplier, entries)}
+                            onClick={() => handleBuildSupplierPO(currentSupplier, entries)}
                             disabled={selectedInGroup.length === 0 || isGenerating}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] px-4 py-1.5 border-b border-indigo-800 rounded-lg shadow-sm transition-colors cursor-pointer disabled:bg-slate-200 disabled:text-slate-400 disabled:border-none"
-                            title="专厂直接生成采购排产单，无需汇总其他厂家"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] px-4 py-1.5 border-b border-indigo-800 rounded-lg shadow-sm transition-colors cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:border-none"
                           >
-                            🏭 分厂直下：确认向 [ {supplier} ] 派单投产
+                            🏭 确认向该生产厂 [ {currentSupplier} ] 派单投产
                           </button>
                         </div>
                       </div>
                     </div>
                   );
-                })}
+                })()}
               </div>
             </div>
           )}

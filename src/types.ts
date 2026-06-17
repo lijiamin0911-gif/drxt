@@ -9,6 +9,9 @@ export interface User {
   pin: string;
   createdAt: string;
   sessionToken?: string;
+  isViceAdmin?: boolean; // 是否为副管理员
+  branchSalesEnabled?: boolean; // 分店端是否具备查看本店销售数据权限
+  branchStockEnabled?: boolean; // 分店端是否具备导入及参考库存权限
 }
 
 export interface Order {
@@ -75,7 +78,7 @@ export interface Supplier {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  merchandiserName?: string; // 所属采购跟单 (例如: 采购主管、李跟单、王采购)
+  merchandiserName?: string; // 所属采购跟单 (例如: 采购、李跟单、王采购)
   leadTimeText?: string;      // 供应意向交期描述 (例如: "3-5天", "10天", "供货不稳定")
 }
 
@@ -134,4 +137,26 @@ export interface InventoryItem {
   permanentCancelReason?: string;
   permanentCancelAt?: string;
 }
+
+export interface SalesRecord {
+  id: string;
+  branchName: string;
+  productCode: string;
+  productName: string;
+  specs: string;
+  quantity: number;
+  month: string; // e.g. '2026-05'
+  importedAt: string;
+}
+
+export interface BranchStock {
+  id: string;
+  branchName: string;
+  productCode: string;
+  productName: string;
+  specs: string;
+  currentStock: number;
+  updatedAt: string;
+}
+
 

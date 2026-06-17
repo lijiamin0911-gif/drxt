@@ -13,7 +13,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured, disableFirebase } from './firebase';
-import { User, Order, PurchaseOrder, Arrival, SystemConfig, OperationLog, Role, InventoryItem, Product, Supplier } from '../types';
+import { User, Order, PurchaseOrder, Arrival, SystemConfig, OperationLog, Role, InventoryItem, Product, Supplier, SalesRecord, BranchStock } from '../types';
 
 enum OperationType {
   CREATE = 'create',
@@ -185,7 +185,7 @@ export const SEED_SUPPLIERS: Supplier[] = [
     isActive: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    merchandiserName: '采购主管',
+    merchandiserName: '采购',
     leadTimeText: '有常备意向交期: 3-5天'
   },
   {
@@ -196,7 +196,7 @@ export const SEED_SUPPLIERS: Supplier[] = [
     isActive: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    merchandiserName: '采购主管',
+    merchandiserName: '采购',
     leadTimeText: '有周期限制: 7天内生产'
   },
   {
@@ -286,6 +286,8 @@ export class DbService {
   private static cachedInventory: InventoryItem[] | null = null;
   private static cachedProducts: Product[] | null = null;
   private static cachedSuppliers: Supplier[] | null = null;
+  private static cachedSalesRecords: SalesRecord[] | null = null;
+  private static cachedBranchStocks: BranchStock[] | null = null;
 
   // Register state change listeners
   public static onChange(callback: () => void) {
@@ -345,7 +347,7 @@ export class DbService {
         // Subscribe to real-time changes
         if (isFirebaseConfigured && db && !this.isListeningRealTime) {
           this.isListeningRealTime = true;
-          const collectionsToWatch = ['users', 'orders', 'purchase_orders', 'logs', 'configs', 'inventory', 'products', 'suppliers'];
+          const collectionsToWatch = ['users', 'orders', 'purchase_orders', 'logs', 'configs', 'inventory', 'products', 'suppliers', 'sales_records', 'branch_stocks'];
           collectionsToWatch.forEach(colName => {
             onSnapshot(collection(db, colName), (snap) => {
               const data = snap.docs.map(doc => doc.data());
@@ -366,6 +368,10 @@ export class DbService {
                 this.cachedProducts = data as Product[];
               } else if (colName === 'suppliers') {
                 this.cachedSuppliers = data as Supplier[];
+              } else if (colName === 'sales_records') {
+                this.cachedSalesRecords = data as SalesRecord[];
+              } else if (colName === 'branch_stocks') {
+                this.cachedBranchStocks = data as BranchStock[];
               }
               this.triggerChange();
             }, (err) => {
@@ -1517,7 +1523,7 @@ export class DbService {
     if (!order) throw new Error('订单未找到');
     order.status = 'deleted_abnormal';
     await this.saveOrder(order, operator);
-    await this.log(operator.id, operator.name, operator.role, '采购审核同意删除', `采购主管 [${operator.name}] 最终批准了订单 [${order.orderNo}] 的异常删除申请，订单标记为【异常删除】`);
+    await this.log(operator.id, operator.name, operator.role, '采购审核同意删除', `采购员 [${operator.name}] 最终批准了订单 [${order.orderNo}] 的异常删除申请，订单标记为【异常删除】`);
     this.triggerChange();
   }
 
@@ -1866,6 +1872,116 @@ export class DbService {
       operator.role,
       '更新货品价格数据',
       `采购员更新了货项编号订单ID [${orderId}] 的价格体系：上次价格 ¥${previousPrice} -> 本次价格 ¥${currentPrice}`
+    );
+
+    this.triggerChange();
+  }
+
+  public static async getSalesRecords(): Promise<SalesRecord[]> {
+    if (this.cachedSalesRecords) {
+      return this.cachedSalesRecords;
+    }
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'sales_records'));
+        const list = snap.docs.map(d => d.data() as SalesRecord);
+        this.cachedSalesRecords = list;
+        return list;
+      } catch (e) {
+        handleFirestoreError(e, OperationType.LIST, 'sales_records');
+      }
+    }
+    return getLocalData<SalesRecord[]>('db_sales_records', []);
+  }
+
+  public static async saveSalesRecords(records: SalesRecord[], operator: { id: string; name: string; role: string }): Promise<void> {
+    if (isFirebaseConfigured && db) {
+      try {
+        for (const item of records) {
+          await setDoc(doc(db, 'sales_records', item.id), item);
+        }
+      } catch (e) {
+        handleFirestoreError(e, OperationType.WRITE, 'sales_records');
+      }
+    } else {
+      const current = getLocalData<SalesRecord[]>('db_sales_records', []);
+      const updated = [...current];
+      for (const item of records) {
+        const idx = updated.findIndex(r => r.id === item.id);
+        if (idx > -1) {
+          updated[idx] = item;
+        } else {
+          updated.push(item);
+        }
+      }
+      setLocalData('db_sales_records', updated);
+    }
+
+    if (this.cachedSalesRecords) {
+      this.cachedSalesRecords = null; // force reload
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '导入分店销售数据',
+      `成功批量导入/上传了共 ${records.length} 条分店往期销售业绩数据`
+    );
+
+    this.triggerChange();
+  }
+
+  public static async getBranchStocks(): Promise<BranchStock[]> {
+    if (this.cachedBranchStocks) {
+      return this.cachedBranchStocks;
+    }
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'branch_stocks'));
+        const list = snap.docs.map(d => d.data() as BranchStock);
+        this.cachedBranchStocks = list;
+        return list;
+      } catch (e) {
+        handleFirestoreError(e, OperationType.LIST, 'branch_stocks');
+      }
+    }
+    return getLocalData<BranchStock[]>('db_branch_stocks', []);
+  }
+
+  public static async saveBranchStocks(stocks: BranchStock[], operator: { id: string; name: string; role: string }): Promise<void> {
+    if (isFirebaseConfigured && db) {
+      try {
+        for (const item of stocks) {
+          await setDoc(doc(db, 'branch_stocks', item.id), item);
+        }
+      } catch (e) {
+        handleFirestoreError(e, OperationType.WRITE, 'branch_stocks');
+      }
+    } else {
+      const current = getLocalData<BranchStock[]>('db_branch_stocks', []);
+      const updated = [...current];
+      for (const item of stocks) {
+        const idx = updated.findIndex(s => s.id === item.id || (s.branchName === item.branchName && s.productCode === item.productCode));
+        if (idx > -1) {
+          updated[idx] = { ...updated[idx], ...item };
+        } else {
+          updated.push(item);
+        }
+      }
+      setLocalData('db_branch_stocks', updated);
+    }
+
+    if (this.cachedBranchStocks) {
+      this.cachedBranchStocks = null; // force reload
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '导入分店参考库存数据',
+      `成功批量导入/上传了共 ${stocks.length} 条分店在库现存量参考数据`
     );
 
     this.triggerChange();

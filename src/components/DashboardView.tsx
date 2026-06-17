@@ -341,7 +341,7 @@ export default function DashboardView({ orders, systemConfig, onConfigChange, cu
             <p className="text-xs md:text-sm text-rose-800">
               当前系统内的总欠货数量为 <strong className="text-rose-950 font-bold text-base px-1">{totalShortageQty}</strong> 件，
               已超出管理员设定的警戒红线（<strong className="font-semibold">{systemConfig.shortageThreshold}</strong> 件）。
-              请采购主管尽快处理欠货报表，并向厂家发起【一键补货】以缓解分店缺货情况！
+              请采购部门人员尽快处理欠货报表，并向厂家发起【一键补货】以缓解分店缺货情况！
             </p>
           </div>
         </div>

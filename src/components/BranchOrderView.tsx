@@ -1818,7 +1818,7 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
                                     )}
                                     {order.remarkRole === 'purchasing' && (
                                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                        🏭 【采购主管: {order.remarkOperatorName || '采购'}】补充: {order.remark}
+                                        🏭 【采购: {order.remarkOperatorName || '采购'}】补充: {order.remark}
                                       </span>
                                     )}
                                     {(!order.remarkRole || order.remarkRole === 'branch' || order.remarkRole === 'admin') && (
