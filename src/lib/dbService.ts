@@ -1,17 +1,16 @@
-import { 
-  collection, 
-  doc, 
-  getDocs, 
-  getDoc, 
-  setDoc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  query, 
-  where, 
-  orderBy
-} from 'firebase/firestore';
+const collection = (() => {}) as any;
+const doc = (() => {}) as any;
+const getDocs = (() => Promise.resolve({ empty: true, docs: [] })) as any;
+const getDoc = (() => Promise.resolve({ exists: () => false, data: () => null })) as any;
+const setDoc = (() => Promise.resolve()) as any;
+const addDoc = (() => Promise.resolve()) as any;
+const updateDoc = (() => Promise.resolve()) as any;
+const deleteDoc = (() => Promise.resolve()) as any;
+const onSnapshot = (() => {}) as any;
+const query = (() => {}) as any;
+const where = (() => {}) as any;
+const orderBy = (() => {}) as any;
+
 import { db, isFirebaseConfigured, disableFirebase } from './firebase';
 import { User, Order, PurchaseOrder, Arrival, SystemConfig, OperationLog, Role, InventoryItem, Product, Supplier, SalesRecord, BranchStock } from '../types';
 

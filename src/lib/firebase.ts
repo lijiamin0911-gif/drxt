@@ -1,35 +1,12 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { initializeFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+// src/lib/firebase.ts
 
-const isConfigured = 
-  firebaseConfig && 
-  firebaseConfig.apiKey && 
-  firebaseConfig.apiKey !== 'PLACEHOLDER' &&
-  firebaseConfig.projectId !== 'PLACEHOLDER';
+export const db: any = null;
+export const auth: any = null;
+export const isFirebaseConfigured = false;
 
-let app;
-let db: any = null;
-let auth: any = null;
-
-if (isConfigured) {
-  try {
-    app = initializeApp(firebaseConfig);
-    db = initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-    }, firebaseConfig.firestoreDatabaseId);
-    auth = getAuth(app);
-  } catch (error) {
-    console.error('Failed to initialize Firebase:', error);
-  }
-}
-
-export { db, auth };
-export let isFirebaseConfigured = isConfigured;
 export function disableFirebase() {
-  isFirebaseConfigured = false;
-  console.warn('⚠️ Firebase has been disabled due to connection/offline failure. Falling back to Local Storage.');
+  console.warn('⚠️ Firebase has been disabled for offline local mode.');
 }
-export const googleProvider = new GoogleAuthProvider();
-export { signInWithPopup };
+
+export const googleProvider: any = null;
+export const signInWithPopup: any = null;
