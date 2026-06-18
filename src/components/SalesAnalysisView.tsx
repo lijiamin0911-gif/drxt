@@ -451,8 +451,24 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
   const [yoySelectedProductCode, setYoySelectedProductCode] = useState<string>('');
   const [yoySelectedSupplier, setYoySelectedSupplier] = useState<string>('all');
 
-  // Interactive Month display filters
-  const [yoyFocusedMonth, setYoyFocusedMonth] = useState<string>(''); // empty means show all 12 months side by side, otherwise filter only that month.
+  // Custom multi-select YoY states
+  const [yoySelectedYears, setYoySelectedYears] = useState<string[]>([]);
+  const [yoySelectedMonths, setYoySelectedMonths] = useState<string[]>([]);
+
+  // Sync initial yoy states
+  useEffect(() => {
+    if (availableYears.length > 0 && yoySelectedYears.length === 0) {
+      // By default select the two most recent available years
+      setYoySelectedYears(availableYears.slice(0, 2));
+    }
+  }, [availableYears, yoySelectedYears]);
+
+  useEffect(() => {
+    if (yoySelectedMonths.length === 0) {
+      // All 12 months selected by default
+      setYoySelectedMonths(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']);
+    }
+  }, [yoySelectedMonths]);
 
   // Get matching product details for display
   const yoyMatchedProductObj = useMemo(() => {
@@ -492,13 +508,14 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
     return Array.from(set).sort();
   }, [salesRecords]);
 
-  // Compute Years on comparative ranges
-  const currentBriefYearNum = parseInt(filterYear); // selected active year (e.g. 2026)
-  const lastBriefYearNum = currentBriefYearNum - 1; // last year (e.g. 2025)
+  // Sort selected years ascending
+  const sortedYoySelectedYearsAsc = useMemo(() => {
+    return [...yoySelectedYears].sort((a, b) => parseInt(a) - parseInt(b));
+  }, [yoySelectedYears]);
 
   // Side-by-side Monthly dataset calculation
   const yoyMonthlyCompareData = useMemo(() => {
-    if (!yoySelectedProductCode) return [];
+    if (!yoySelectedProductCode || yoySelectedYears.length === 0) return [];
 
     // Filter original salesRecords for SELECTED product
     let subset = salesRecords.filter(r => r.productCode === yoySelectedProductCode);
@@ -510,46 +527,73 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
 
     // Apply Branch filter
     if (currentUser.role === 'branch') {
-      // Branch user can strictly only see their own branch
       subset = subset.filter(r => r.branchName === currentUser.branchName);
     } else if (selectedBranch !== 'all') {
       subset = subset.filter(r => r.branchName === selectedBranch);
     }
 
-    // Accumulate monthly totals for Both Years
-    const currentYearSalesMap: { [monthStr: string]: number } = {};
-    const lastYearSalesMap: { [monthStr: string]: number } = {};
+    // Accumulate monthly totals for each selected year
+    const yearSalesMap: { [yearStr: string]: { [monthStr: string]: number } } = {};
+    yoySelectedYears.forEach(yr => {
+      yearSalesMap[yr] = {};
+    });
 
     subset.forEach(r => {
       const [yr, mo] = r.month.split('-');
-      if (yr === currentBriefYearNum.toString()) {
-        currentYearSalesMap[mo] = (currentYearSalesMap[mo] || 0) + r.quantity;
-      } else if (yr === lastBriefYearNum.toString()) {
-        lastYearSalesMap[mo] = (lastYearSalesMap[mo] || 0) + r.quantity;
+      if (yearSalesMap[yr]) {
+        yearSalesMap[yr][mo] = (yearSalesMap[yr][mo] || 0) + r.quantity;
       }
     });
 
     // Make 12-month array
     let result = monthsList.map(mo => {
-      const cyQty = currentYearSalesMap[mo] || 0;
-      const lyQty = lastYearSalesMap[mo] || 0;
-      const diff = cyQty - lyQty;
-      const pct = lyQty > 0 ? parseFloat(((diff / lyQty) * 10).toFixed(1)) * 10 : (cyQty > 0 ? 100 : 0);
-
-      return {
+      const item: any = {
         monthKey: mo,
         monthName: `${parseInt(mo)}月`,
-        lastYearValue: lyQty,
-        currentYearValue: cyQty,
-        difference: diff,
-        percentageLabel: lyQty > 0 ? `${diff > 0 ? '+' : ''}${pct}%` : (cyQty > 0 ? '一' : '0%'),
-        rawPercent: pct
       };
+
+      // Populate each selected year's value
+      yoySelectedYears.forEach(yr => {
+        item[yr] = yearSalesMap[yr][mo] || 0;
+      });
+
+      // Compute comparative statistics if at least 2 years are selected
+      if (sortedYoySelectedYearsAsc.length >= 2) {
+        const latestYr = sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 1];
+        const prevYr = sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 2];
+        const cyQty = item[latestYr] || 0;
+        const lyQty = item[prevYr] || 0;
+        const diff = cyQty - lyQty;
+        const pct = lyQty > 0 ? parseFloat(((diff / lyQty) * 10).toFixed(1)) * 10 : (cyQty > 0 ? 100 : 0);
+
+        item.difference = diff;
+        item.percentageLabel = lyQty > 0 ? `${diff > 0 ? '+' : ''}${pct}%` : (cyQty > 0 ? '一' : '0%');
+        item.rawPercent = pct;
+        item.lastYearValue = lyQty;  // fallback
+        item.currentYearValue = cyQty; // fallback
+      } else if (sortedYoySelectedYearsAsc.length === 1) {
+        const soleYr = sortedYoySelectedYearsAsc[0];
+        item.difference = 0;
+        item.percentageLabel = '0%';
+        item.rawPercent = 0;
+        item.lastYearValue = item[soleYr] || 0;
+        item.currentYearValue = item[soleYr] || 0;
+      } else {
+        item.difference = 0;
+        item.percentageLabel = '0%';
+        item.rawPercent = 0;
+        item.lastYearValue = 0;
+        item.currentYearValue = 0;
+      }
+
+      return item;
     });
 
-    // If a specific monthly filter is locked (focused month is active)
-    if (yoyFocusedMonth) {
-      result = result.filter(r => r.monthKey === yoyFocusedMonth);
+    // Filter by selected months
+    if (yoySelectedMonths.length > 0) {
+      result = result.filter(r => yoySelectedMonths.includes(r.monthKey));
+    } else {
+      return [];
     }
 
     return result;
@@ -559,48 +603,56 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
     yoySelectedSupplier, 
     selectedBranch, 
     currentUser, 
-    currentBriefYearNum, 
-    lastBriefYearNum, 
-    yoyFocusedMonth, 
+    yoySelectedYears,
+    sortedYoySelectedYearsAsc,
+    yoySelectedMonths, 
     monthsList
   ]);
 
   // Aggregate totals
   const yoyCalculationsTotal = useMemo(() => {
+    const totals: { [yr: string]: number } = {};
+    yoySelectedYears.forEach(yr => {
+      totals[yr] = 0;
+    });
+
+    yoyMonthlyCompareData.forEach(d => {
+      yoySelectedYears.forEach(yr => {
+        totals[yr] += d[yr] || 0;
+      });
+    });
+
     let lyTotal = 0;
     let cyTotal = 0;
-    yoyMonthlyCompareData.forEach(d => {
-      lyTotal += d.lastYearValue;
-      cyTotal += d.currentYearValue;
-    });
-    const diff = cyTotal - lyTotal;
-    const rate = lyTotal > 0 ? parseFloat(((diff / lyTotal) * 100).toFixed(1)) : 0;
+    let diff = 0;
+    let rate = 0;
+
+    if (sortedYoySelectedYearsAsc.length >= 2) {
+      const latestYr = sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 1];
+      const prevYr = sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 2];
+      cyTotal = totals[latestYr] || 0;
+      lyTotal = totals[prevYr] || 0;
+      diff = cyTotal - lyTotal;
+      rate = lyTotal > 0 ? parseFloat(((diff / lyTotal) * 100).toFixed(1)) : 0;
+    } else if (sortedYoySelectedYearsAsc.length === 1) {
+      const soleYr = sortedYoySelectedYearsAsc[0];
+      cyTotal = totals[soleYr] || 0;
+      lyTotal = totals[soleYr] || 0;
+      diff = 0;
+      rate = 0;
+    }
+
     return {
+      totals,
       lyTotal,
       cyTotal,
       diff,
       rate
     };
-  }, [yoyMonthlyCompareData]);
+  }, [yoyMonthlyCompareData, yoySelectedYears, sortedYoySelectedYearsAsc]);
 
-
-  // Quick selection YoY month buttons
-  const handleYoYMonthPresetAction = (type: 'current' | 'last' | 'all') => {
-    const now = new Date();
-    const curMo = now.getMonth() + 1; // 1-12
-    
-    if (type === 'all') {
-      setYoyFocusedMonth('');
-    } else if (type === 'current') {
-      const moStr = curMo < 10 ? `0${curMo}` : `${curMo}`;
-      setYoyFocusedMonth(moStr);
-    } else if (type === 'last') {
-      let prevMo = curMo - 1;
-      if (prevMo === 0) prevMo = 12;
-      const moStr = prevMo < 10 ? `0${prevMo}` : `${prevMo}`;
-      setYoyFocusedMonth(moStr);
-    }
-  };
+  const latestYearStr = sortedYoySelectedYearsAsc.length > 0 ? sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 1] : '';
+  const secondLatestYearStr = sortedYoySelectedYearsAsc.length > 1 ? sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 2] : '';
 
 
   return (
@@ -1133,64 +1185,136 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                 </div>
               )}
 
-              {/* Active benchmark Year selector */}
-              <div className="md:col-span-2 space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  基准本年
-                </label>
-                <select
-                  value={filterYear}
-                  onChange={e => setFilterYear(e.target.value)}
-                  className="w-full text-xs p-2 border border-slate-200 bg-white rounded-xl focus:border-indigo-600 focus:outline-none font-bold text-slate-800"
-                >
-                  {availableYears.map(yr => (
-                    <option key={yr} value={yr}>{yr}年</option>
-                  ))}
-                </select>
-              </div>
-
             </div>
 
-            {/* Quick Month comparisons panel */}
-            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
-              <span className="text-xs text-slate-400 font-bold">月份对比跨度：</span>
-              <button
-                onClick={() => handleYoYMonthPresetAction('all')}
-                className={`px-3 py-1 bg-slate-100 text-slate-700 hover:bg-indigo-55 rounded-lg text-xs font-bold transition-all ${
-                  !yoyFocusedMonth ? 'bg-indigo-600 text-white hover:bg-indigo-700' : ''
-                }`}
-              >
-                全部月份并排对比
-              </button>
-              <button
-                onClick={() => handleYoYMonthPresetAction('current')}
-                className={`px-3 py-1 bg-slate-100 text-slate-700 hover:bg-indigo-55 rounded-lg text-xs font-bold transition-all ${
-                  yoyFocusedMonth === (new Date().getMonth() + 1 < 10 ? `0${new Date().getMonth() + 1}` : `${new Date().getMonth() + 1}`) ? 'bg-indigo-600 text-white hover:bg-indigo-700' : ''
-                }`}
-              >
-                查看本月同比 ({new Date().getMonth() + 1}月)
-              </button>
-              <button
-                onClick={() => handleYoYMonthPresetAction('last')}
-                className={`px-3 py-1 bg-slate-100 text-slate-700 hover:bg-indigo-55 rounded-lg text-xs font-bold transition-all ${
-                  yoyFocusedMonth === (new Date().getMonth() === 0 ? '12' : (new Date().getMonth() < 10 ? `0${new Date().getMonth()}` : `${new Date().getMonth()}`)) ? 'bg-indigo-600 text-white hover:bg-indigo-700' : ''
-                }`}
-              >
-                查看上月同比 ({new Date().getMonth() === 0 ? 12 : new Date().getMonth()}月)
-              </button>
+            {/* Years Selection (Checkboxes) */}
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span className="w-1.5 h-3 bg-blue-600 rounded-full"></span>
+                📊 选择对比年份 (可多选，进行多年度数据并排对比)：
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {availableYears.map(yr => {
+                  const isSelected = yoySelectedYears.includes(yr);
+                  return (
+                    <button
+                      key={yr}
+                      onClick={() => {
+                        if (isSelected) {
+                          if (yoySelectedYears.length > 1) {
+                            setYoySelectedYears(yoySelectedYears.filter(y => y !== yr));
+                          }
+                        } else {
+                          setYoySelectedYears([...yoySelectedYears, yr]);
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                        isSelected 
+                          ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-xs' 
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}} // click handled on parent button
+                        className="rounded text-blue-600 focus:ring-blue-500 w-3 h-3 cursor-pointer pointer-events-none"
+                      />
+                      <span>{yr}年</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-              <div className="ml-auto flex items-center gap-1">
-                <span className="text-xs text-slate-500">选择任意月份：</span>
-                <select
-                  value={yoyFocusedMonth}
-                  onChange={e => setYoyFocusedMonth(e.target.value)}
-                  className="text-xs px-2 py-1 border border-slate-200 bg-white rounded-lg focus:outline-none"
+            {/* Quick Month comparisons panel with Multi-Select Pills */}
+            <div className="pt-3 border-t border-slate-100 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-500 font-bold">季度与快速预设：</span>
+                <button
+                  onClick={() => setYoySelectedMonths(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'])}
+                  className={`px-3 py-1 text-xs rounded-lg font-bold border transition-all cursor-pointer ${
+                    yoySelectedMonths.length === 12 ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
                 >
-                  <option value="">-- 全年对比 --</option>
-                  {monthsList.map(mo => (
-                    <option key={mo} value={mo}>{parseInt(mo)}月</option>
-                  ))}
-                </select>
+                  全部 12 个月
+                </button>
+                <button
+                  onClick={() => setYoySelectedMonths(['01', '02', '03'])}
+                  className={`px-3 py-1 text-xs rounded-lg font-bold border transition-all cursor-pointer ${
+                    yoySelectedMonths.length === 3 && yoySelectedMonths.includes('01') && yoySelectedMonths.includes('03') ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  第一季度 (1-3月)
+                </button>
+                <button
+                  onClick={() => setYoySelectedMonths(['04', '05', '06'])}
+                  className={`px-3 py-1 text-xs rounded-lg font-bold border transition-all cursor-pointer ${
+                    yoySelectedMonths.length === 3 && yoySelectedMonths.includes('04') && yoySelectedMonths.includes('06') ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  第二季度 (4-6月)
+                </button>
+                <button
+                  onClick={() => setYoySelectedMonths(['07', '08', '09'])}
+                  className={`px-3 py-1 text-xs rounded-lg font-bold border transition-all cursor-pointer ${
+                    yoySelectedMonths.length === 3 && yoySelectedMonths.includes('07') && yoySelectedMonths.includes('09') ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  第三季度 (7-9月)
+                </button>
+                <button
+                  onClick={() => setYoySelectedMonths(['10', '11', '12'])}
+                  className={`px-3 py-1 text-xs rounded-lg font-bold border transition-all cursor-pointer ${
+                    yoySelectedMonths.length === 3 && yoySelectedMonths.includes('10') && yoySelectedMonths.includes('12') ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  第四季度 (10-12月)
+                </button>
+                <button
+                  onClick={() => {
+                    const curMo = (new Date().getMonth() + 1).toString().padStart(2, '0');
+                    setYoySelectedMonths([curMo]);
+                  }}
+                  className="px-3 py-1 text-xs rounded-lg font-bold border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
+                >
+                  本月 ({new Date().getMonth() + 1}月)
+                </button>
+              </div>
+
+              {/* Month multiselect grid */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <span className="w-1.5 h-3 bg-indigo-600 rounded-full"></span>
+                  🗓️ 选择对比月份 (可多选任意月份，点选切换勾选状态)：
+                </span>
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-12 gap-2">
+                  {monthsList.map(mo => {
+                    const isSelected = yoySelectedMonths.includes(mo);
+                    const label = `${parseInt(mo)}月`;
+                    return (
+                      <button
+                        key={mo}
+                        onClick={() => {
+                          if (isSelected) {
+                            if (yoySelectedMonths.length > 1) {
+                              setYoySelectedMonths(yoySelectedMonths.filter(m => m !== mo));
+                            }
+                          } else {
+                            setYoySelectedMonths([...yoySelectedMonths, mo].sort());
+                          }
+                        }}
+                        className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer text-center ${
+                          isSelected 
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' 
+                            : 'bg-white border-slate-200 text-slate-600 hover:border-slate-350 hover:bg-slate-50'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -1234,8 +1358,10 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                     <Calendar className="w-5 h-5 text-slate-500" />
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-400 font-bold uppercase leading-none">去年同期总销售 ({lastBriefYearNum}年)</div>
-                    <div className="text-lg font-black text-slate-800 font-mono mt-1.5">
+                    <div className="text-[11px] text-slate-400 font-bold uppercase leading-none">
+                      {secondLatestYearStr ? `${secondLatestYearStr}年 同期累计` : '对比上期累计'}
+                    </div>
+                    <div className="text-lg font-black text-slate-800 font-mono mt-1.5 font-bold">
                       {yoyCalculationsTotal.lyTotal.toLocaleString()} <span className="text-xs font-normal text-slate-400">件</span>
                     </div>
                   </div>
@@ -1247,8 +1373,10 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                     <Calendar className="w-5 h-5 text-blue-600" />
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-400 font-bold uppercase leading-none">本期累计销售 ({currentBriefYearNum}年)</div>
-                    <div className="text-lg font-black text-slate-800 font-mono mt-1.5">
+                    <div className="text-[11px] text-slate-400 font-bold uppercase leading-none">
+                      {latestYearStr ? `${latestYearStr}年 选期累计` : '当前选期累计'}
+                    </div>
+                    <div className="text-lg font-black text-slate-800 font-mono mt-1.5 font-bold">
                       {yoyCalculationsTotal.cyTotal.toLocaleString()} <span className="text-xs font-normal text-slate-400">件</span>
                     </div>
                   </div>
@@ -1262,7 +1390,9 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                     {yoyCalculationsTotal.diff >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-400 font-bold uppercase leading-none">同期差值与变动比率</div>
+                    <div className="text-[11px] text-slate-400 font-bold uppercase leading-none">
+                      {latestYearStr && secondLatestYearStr ? `${latestYearStr}年 vs ${secondLatestYearStr}年 增幅` : '同期差值与变动比率'}
+                    </div>
                     <div className={`text-base font-black font-mono mt-1 ${
                       yoyCalculationsTotal.diff >= 0 ? 'text-rose-600' : 'text-emerald-600'
                     }`}>
@@ -1281,12 +1411,12 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                 <div className="bg-white rounded-2xl border border-slate-150 p-5 shadow-sm lg:col-span-8 space-y-4">
                   <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider pb-2 border-b border-slate-100">
                     <BarChart2 className="w-4 h-4 text-slate-500" />
-                    本年对比上年销售走势并排对比 (柱状图)
+                    多年度选定月份销售走势并排对比 (柱状图)
                   </h4>
                   
-                  {yoyCalculationsTotal.lyTotal === 0 && yoyCalculationsTotal.cyTotal === 0 ? (
+                  {sortedYoySelectedYearsAsc.length === 0 || (yoyCalculationsTotal.lyTotal === 0 && yoyCalculationsTotal.cyTotal === 0) ? (
                     <div className="h-64 flex flex-col items-center justify-center text-slate-400 text-xs italic">
-                      选定条件下没有该产品在进行年份({lastBriefYearNum} / {currentBriefYearNum})的历史累计销量流水。
+                      选定条件下没有该产品在所选年份或月份的历史销量流水。
                     </div>
                   ) : (
                     <div className="h-72 w-full pt-2">
@@ -1302,20 +1432,21 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                             contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e2e8f0', background: 'rgba(255,255,255,0.95)' }}
                           />
                           <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                          <Bar 
-                            dataKey="lastYearValue" 
-                            name={`${lastBriefYearNum}年 同期`} 
-                            fill="#94a3b8" 
-                            radius={[4, 4, 0, 0]} 
-                            barSize={16}
-                          />
-                          <Bar 
-                            dataKey="currentYearValue" 
-                            name={`${currentBriefYearNum}年 同期`} 
-                            fill="#6366f1" 
-                            radius={[4, 4, 0, 0]} 
-                            barSize={16}
-                          />
+                          {sortedYoySelectedYearsAsc.map((yr, idx) => {
+                            // Beautiful colors for different years to distinguish them
+                            const colors = ["#cbd5e1", "#94a3b8", "#6366f1", "#f59e0b", "#10b981", "#ec4899", "#ef4444"];
+                            const fill = colors[idx % colors.length];
+                            return (
+                              <Bar 
+                                key={yr}
+                                dataKey={yr} 
+                                name={`${yr}年 同期`} 
+                                fill={fill} 
+                                radius={[4, 4, 0, 0]} 
+                                barSize={sortedYoySelectedYearsAsc.length > 3 ? 10 : 16}
+                              />
+                            );
+                          })}
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -1332,22 +1463,24 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                   <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1">
                     {yoyMonthlyCompareData.map(d => {
                       const isUp = d.difference >= 0;
+                      const hasCompare = sortedYoySelectedYearsAsc.length >= 2;
+                      
                       return (
-                        <div key={d.monthKey} className="p-3 bg-slate-50 rounded-xl border border-slate-155 flex items-center justify-between">
-                          <div>
-                            <div className="text-xs font-extrabold text-slate-800">{d.monthName}</div>
-                            <div className="text-[10px] text-slate-400 mt-1 font-mono">
-                              {lastBriefYearNum}年: {d.lastYearValue}件 | {currentBriefYearNum}年: {d.currentYearValue}件
-                            </div>
+                        <div key={d.monthKey} className="p-3 bg-slate-50 rounded-xl border border-slate-155 flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-extrabold text-slate-800">{d.monthName}</span>
+                            {hasCompare && (
+                              <span className={`text-xs font-black font-mono ${isUp ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                {isUp ? `+${d.difference}` : d.difference} 件 ({d.percentageLabel})
+                              </span>
+                            )}
                           </div>
-
-                          <div className="text-right">
-                            <div className={`text-xs font-black font-mono ${isUp ? 'text-rose-600' : 'text-emerald-600'}`}>
-                              {isUp ? `+${d.difference}` : d.difference} 件
-                            </div>
-                            <div className={`text-[10px] font-bold mt-0.5 ${isUp ? 'text-rose-500' : 'text-emerald-500'}`}>
-                              {d.percentageLabel}
-                            </div>
+                          <div className="text-[10px] text-slate-500 font-mono flex flex-wrap gap-1.5">
+                            {sortedYoySelectedYearsAsc.map(yr => (
+                              <span key={yr} className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
+                                {yr}年: <span className="font-extrabold text-slate-800">{d[yr] || 0}</span>件
+                              </span>
+                            ))}
                           </div>
                         </div>
                       );

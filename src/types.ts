@@ -96,6 +96,29 @@ export interface PurchaseOrder {
   createdAt: string;
 }
 
+export interface IndependentPurchaseOrderItem {
+  productCode: string;
+  productName: string;
+  specs: string;
+  quantity: number;
+  supplier: string;
+  remark?: string;
+  receivedQty: number; // 实际到货数量
+  isNew?: boolean; // 是否处于未审核的新品标记状态
+}
+
+export interface IndependentPurchaseOrder {
+  id: string;
+  poNo: string;
+  orderDate: string;
+  status: 'pending_arrival' | 'completed'; // “已提交给厂家” (即 pending_arrival) 或 “已到货” / 部分到货 (Completed)
+  remarks: string;
+  items: IndependentPurchaseOrderItem[];
+  factoryStatus: 'unconfirmed' | 'confirmed';
+  expectedArrivalDate?: string;
+  createdAt: string;
+}
+
 export interface Arrival {
   id: string;
   poId: string;

@@ -36,6 +36,7 @@ import LogsView from './components/LogsView';
 import InventoryView from './components/InventoryView';
 import OrderQueryView from './components/OrderQueryView';
 import SalesAnalysisView from './components/SalesAnalysisView';
+import ReplenishmentMgmtView from './components/ReplenishmentMgmtView';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -750,6 +751,16 @@ export default function App() {
               </button>
 
               <button
+                onClick={() => setActiveTab('replenishment-mgmt')}
+                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'replenishment-mgmt' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5 text-indigo-505 text-indigo-500 font-bold" />
+                <span>补货单/采购单管理</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('shortage-reports')}
                 className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 relative ${
                   activeTab === 'shortage-reports' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
@@ -865,6 +876,16 @@ export default function App() {
                 <ShoppingBag className="w-3.5 h-3.5" />
                 <span>采购并单汇总与到到货</span>
               </button>
+
+              <button
+                onClick={() => setActiveTab('replenishment-mgmt')}
+                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'replenishment-mgmt' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5 text-indigo-500 font-bold" />
+                <span>补货单/采购单管理</span>
+              </button>
               
               <button
                 onClick={() => setActiveTab('shortage-reports')}
@@ -960,6 +981,12 @@ export default function App() {
 
           {activeTab === 'inventory-registry' && (
             <InventoryView
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeTab === 'replenishment-mgmt' && (
+            <ReplenishmentMgmtView
               currentUser={currentUser}
             />
           )}

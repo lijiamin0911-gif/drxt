@@ -12,7 +12,7 @@ const where = (() => {}) as any;
 const orderBy = (() => {}) as any;
 
 import { db, isFirebaseConfigured, disableFirebase } from './firebase';
-import { User, Order, PurchaseOrder, Arrival, SystemConfig, OperationLog, Role, InventoryItem, Product, Supplier, SalesRecord, BranchStock } from '../types';
+import { User, Order, PurchaseOrder, Arrival, SystemConfig, OperationLog, Role, InventoryItem, Product, Supplier, SalesRecord, BranchStock, IndependentPurchaseOrder, IndependentPurchaseOrderItem } from '../types';
 
 enum OperationType {
   CREATE = 'create',
@@ -287,6 +287,7 @@ export class DbService {
   private static cachedSuppliers: Supplier[] | null = null;
   private static cachedSalesRecords: SalesRecord[] | null = null;
   private static cachedBranchStocks: BranchStock[] | null = null;
+  private static cachedIndependentPurchaseOrders: IndependentPurchaseOrder[] | null = null;
 
   // Register state change listeners
   public static onChange(callback: () => void) {
@@ -346,7 +347,7 @@ export class DbService {
         // Subscribe to real-time changes
         if (isFirebaseConfigured && db && !this.isListeningRealTime) {
           this.isListeningRealTime = true;
-          const collectionsToWatch = ['users', 'orders', 'purchase_orders', 'logs', 'configs', 'inventory', 'products', 'suppliers', 'sales_records', 'branch_stocks'];
+          const collectionsToWatch = ['users', 'orders', 'purchase_orders', 'logs', 'configs', 'inventory', 'products', 'suppliers', 'sales_records', 'branch_stocks', 'independent_purchase_orders'];
           collectionsToWatch.forEach(colName => {
             onSnapshot(collection(db, colName), (snap) => {
               const data = snap.docs.map(doc => doc.data());
@@ -371,6 +372,8 @@ export class DbService {
                 this.cachedSalesRecords = data as SalesRecord[];
               } else if (colName === 'branch_stocks') {
                 this.cachedBranchStocks = data as BranchStock[];
+              } else if (colName === 'independent_purchase_orders') {
+                this.cachedIndependentPurchaseOrders = data as IndependentPurchaseOrder[];
               }
               this.triggerChange();
             }, (err) => {
@@ -2033,6 +2036,52 @@ export class DbService {
       `成功批量导入/上传了共 ${stocks.length} 条分店在库现存量参考数据`
     );
 
+    this.triggerChange();
+  }
+
+  // --- Independent Purchase Orders ---
+  public static async getIndependentPurchaseOrders(): Promise<IndependentPurchaseOrder[]> {
+    if (this.cachedIndependentPurchaseOrders !== null) {
+      return this.cachedIndependentPurchaseOrders;
+    }
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'independent_purchase_orders'));
+        this.cachedIndependentPurchaseOrders = snap.docs.map(doc => doc.data() as IndependentPurchaseOrder);
+        return this.cachedIndependentPurchaseOrders;
+      } catch (e) {
+        handleFirestoreError(e, OperationType.LIST, 'independent_purchase_orders');
+      }
+    }
+    return getLocalData<IndependentPurchaseOrder[]>('db_independent_purchase_orders', []);
+  }
+
+  public static async saveIndependentPurchaseOrder(po: IndependentPurchaseOrder, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (this.cachedIndependentPurchaseOrders) {
+      const idx = this.cachedIndependentPurchaseOrders.findIndex(p => p.id === po.id);
+      if (idx > -1) {
+        this.cachedIndependentPurchaseOrders[idx] = po;
+      } else {
+        this.cachedIndependentPurchaseOrders.push(po);
+      }
+    }
+
+    if (isFirebaseConfigured && db) {
+      try {
+        await setDoc(doc(db, 'independent_purchase_orders', po.id), po);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.WRITE, `independent_purchase_orders/${po.id}`);
+      }
+    } else {
+      const pos = getLocalData<IndependentPurchaseOrder[]>('db_independent_purchase_orders', []);
+      const idx = pos.findIndex(p => p.id === po.id);
+      if (idx > -1) {
+        pos[idx] = po;
+      } else {
+        pos.push(po);
+      }
+      setLocalData('db_independent_purchase_orders', pos);
+    }
     this.triggerChange();
   }
 }
