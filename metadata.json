@@ -1,8 +1,6 @@
 {
-  "name": "Remix: 多分店订单协同管理系统",
-  "description": "支持管理员、分店、前台、采购等多角色订单流转、采购单汇总、欠货跟踪与一键补货的多分店协同管理系统。",
+  "name": "销售经营分析看板",
+  "description": "销售经营分析看板包含经营总览、产品月报（分店）、总部批发与库存明细模块，支持多汇总维度切换、独立的Excel模板上传下载和数据导出、以及管理员和普通用户的权限隔离管理。",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

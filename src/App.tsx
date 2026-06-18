@@ -1,1173 +1,1196 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  LogOut, 
-  Key, 
-  Building, 
-  Layers, 
-  ShoppingBag, 
-  AlertTriangle, 
-  Terminal, 
-  Sliders, 
-  ShieldAlert, 
-  Users, 
-  CheckCircle,
-  LayoutDashboard,
-  Sparkles,
-  FileSpreadsheet,
-  ArrowRight,
-  ChevronRight,
-  Globe,
-  Lock,
-  Search,
-  TrendingUp
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { DbService } from './lib/dbService';
-import { User, Order, PurchaseOrder, SystemConfig, OperationLog, InventoryItem } from './types';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-// Importing Views
-import DashboardView from './components/DashboardView';
-import UserManagementView from './components/UserManagementView';
-import BranchOrderView from './components/BranchOrderView';
-import ReceptionConfirmView from './components/ReceptionConfirmView';
-import PurchasingView from './components/PurchasingView';
-import ShortageReportView from './components/ShortageReportView';
-import LogsView from './components/LogsView';
-import InventoryView from './components/InventoryView';
-import OrderQueryView from './components/OrderQueryView';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+  ShieldCheck, ShieldAlert, LogOut, Users, Key, Landmark, LayoutDashboard,
+  CalendarDays, Settings, FolderKanban, RotateCcw, TrendingUp,
+  ShoppingBag, ClipboardList, Layers, Truck, Database, Activity, Sparkles, RefreshCw,
+  Award, Briefcase, Home, FileText
+} from 'lucide-react';
+
+import { User, Transaction, InventoryItem, SummaryDimension, Order, PurchaseOrder, SystemConfig } from './types';
+import { 
+  DEFAULT_USERS, DEFAULT_REGION_STORE_MAP, DEFAULT_TRANSACTIONS, DEFAULT_INVENTORY 
+} from './mockData';
+
+// Modular Components
+import { ToastContainer, ToastMessage } from './components/Toast';
+import { 
+  LoginModal, UserManagementModal, ChangePwdModal, RegionMappingModal 
+} from './components/Modals';
+import { OverviewTab } from './components/OverviewTab';
+import { MonthlyReportTab } from './components/MonthlyReportTab';
+import { WholesaleTab } from './components/WholesaleTab';
+import { InventoryTab } from './components/InventoryTab';
 import SalesAnalysisView from './components/SalesAnalysisView';
+
+// ERP Core Live Components
+import DashboardView from './components/DashboardView';
+import BranchOrderView from './components/BranchOrderView';
+import PurchasingView from './components/PurchasingView';
+import ReceptionConfirmView from './components/ReceptionConfirmView';
 import ReplenishmentMgmtView from './components/ReplenishmentMgmtView';
+import UserManagementView from './components/UserManagementView';
+import { DbService } from './lib/dbService';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // ==========================================
+  // Core Business State
+  // ==========================================
   const [users, setUsers] = useState<User[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [logs, setLogs] = useState<OperationLog[]>([]);
-  const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [regionStoreMap, setRegionStoreMap] = useState<Record<string, string[]>>({});
+
+  // UI Navigation / Overlay States
+  const [systemMode, setSystemMode] = useState<'BI' | 'ERP'>('BI');
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'monthly' | 'headWholesale' | 'inventory' | 'bossDashboard' |
+    'erpDashboard' | 'erpBranchOrder' | 'erpPurchase' | 'erpReception' | 'erpReplenish' | 'erpUsersSuppliers'
+  >('overview');
+  const [erpOrders, setErpOrders] = useState<Order[]>([]);
+  const [erpPurchaseOrders, setErpPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [erpSystemConfig, setErpSystemConfig] = useState<SystemConfig | null>(null);
+  const [erpUsers, setErpUsers] = useState<User[]>([]);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
-  const [usernameInput, setUsernameInput] = useState('');
-  const [pinInput, setPinInput] = useState('');
-  const [bypassKickout, setBypassKickout] = useState<boolean>(() => {
-    const stored = localStorage.getItem('bypass_kickout');
-    // Default to true so that users can view multiple roles/tabs simultaneously without kicking others out during evaluation
-    return stored ? stored === 'true' : true;
-  });
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [isUserMgmtOpen, setIsUserMgmtOpen] = useState(false);
+  const [isChangePwdOpen, setIsChangePwdOpen] = useState(false);
+  const [isRegionMapOpen, setIsRegionMapOpen] = useState(false);
 
-  const handleToggleBypass = (val: boolean) => {
-    setBypassKickout(val);
-    localStorage.setItem('bypass_kickout', val ? 'true' : 'false');
-  };
+  // Global Filter States
+  const [globalRegion, setGlobalRegion] = useState('all');
+  const [globalStore, setGlobalStore] = useState('all');
+  const [globalCategory, setGlobalCategory] = useState('all');
+  const [globalYear, setGlobalYear] = useState('all');
 
-  const [showAccountsGuide, setShowAccountsGuide] = useState(true);
-  const [guideSearchQuery, setGuideSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [isLoading, setIsLoading] = useState(true);
+  // Applied values for filtered rendering
+  const [appliedRegion, setAppliedRegion] = useState('all');
+  const [appliedStore, setAppliedStore] = useState('all');
+  const [appliedCategory, setAppliedCategory] = useState('all');
+  const [appliedYear, setAppliedYear] = useState('all');
 
-  // Change password modal state variables
-  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-  const [oldPinInput, setOldPinInput] = useState('');
-  const [newPinInput, setNewPinInput] = useState('');
-  const [confirmNewPinInput, setConfirmNewPinInput] = useState('');
-
-  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser) return;
-
-    if (!oldPinInput || !newPinInput || !confirmNewPinInput) {
-      alert('请完整填写当前密码、新密码和确认新密码');
-      return;
-    }
-
-    if (oldPinInput !== currentUser.pin) {
-      alert('安全验证失败：当前密码错误，请重新输入');
-      return;
-    }
-
-    if (newPinInput.length < 4) {
-      alert('新密码长度不能少于 4 位数字');
-      return;
-    }
-
-    if (newPinInput !== confirmNewPinInput) {
-      alert('新密码与确认新密码不匹配，请重新检查');
-      return;
-    }
-
-    // Update in users and DB
-    const updatedUser: User = {
-      ...currentUser,
-      pin: newPinInput.trim()
-    };
-
-    try {
-      await DbService.saveUser(updatedUser, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-      
-      // Specifically log password self-change
-      await DbService.log(
-        currentUser.id,
-        currentUser.username,
-        currentUser.role,
-        '修改密码',
-        `账号 [${currentUser.username}] 自主更改了登录密码 PIN 码`
-      );
-
-      // Refresh list
-      const u = await DbService.getUsers();
-      setUsers(u);
-      
-      setCurrentUser(updatedUser);
-      setIsChangePasswordOpen(false);
-      setOldPinInput('');
-      setNewPinInput('');
-      setConfirmNewPinInput('');
-      alert('您的登录密码已成功更改！下一次登录请使用新密码。');
-    } catch (err) {
-      console.error(err);
-      alert('密码更新失败，请稍后重试');
-    }
-  };
-
-  // Real-time notification toast queue
-  const [toasts, setToasts] = useState<{ id: string; text: string; type: 'success' | 'info' | 'warning' | 'error'; duration?: number }[]>([]);
-  
-  const addToast = (text: string, type: 'success' | 'info' | 'warning' | 'error' = 'info', duration = 6000) => {
-    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    setToasts(prev => [...prev, { id, text, type, duration }]);
+  // ==========================================
+  // Toast Helper System
+  // ==========================================
+  const addToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now().toString() + Math.random().toString();
+    setToasts(prev => [...prev, { id, text, type }]);
     setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, duration);
+      removeToast(id);
+    }, 4000);
   };
 
-  // Comparative references for state change auditing (real-time notification processing)
-  const prevOrdersRef = useRef<Order[]>([]);
-  const prevPurchaseOrdersRef = useRef<PurchaseOrder[]>([]);
-  const prevInventoryRef = useRef<InventoryItem[]>([]);
-  const isFirstLoadRef = useRef(true);
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
-  // Load and subscribe to DB Changes
+  // ==========================================
+  // Local Database Hydration
+  // ==========================================
   useEffect(() => {
-    let unsubscribe: () => void;
-
-    async function loadAllData() {
-      setIsLoading(true);
+    // 1. Load Mapping
+    const savedMap = localStorage.getItem('salesRegionStoreMap');
+    if (savedMap) {
       try {
-        await DbService.initialize();
-        const [u, o, po, lg, cfg, inv] = await Promise.all([
-          DbService.getUsers(),
-          DbService.getOrders(),
-          DbService.getPurchaseOrders(),
-          DbService.getLogs(),
-          DbService.getConfig(),
-          DbService.getInventory()
-        ]);
-        setUsers(u);
-        setOrders(o);
-        setPurchaseOrders(po);
-        setLogs(lg);
-        setSystemConfig(cfg);
-
-        // Seed comparative registries to block first-load toast flood
-        prevOrdersRef.current = o;
-        prevPurchaseOrdersRef.current = po;
-        prevInventoryRef.current = inv;
-        isFirstLoadRef.current = false;
-
-        // Bind real-time change listener
-        unsubscribe = DbService.onChange(async () => {
-          const [u2, o2, po2, lg2, cfg2, inv2] = await Promise.all([
-            DbService.getUsers(),
-            DbService.getOrders(),
-            DbService.getPurchaseOrders(),
-            DbService.getLogs(),
-            DbService.getConfig(),
-            DbService.getInventory()
-          ]);
-
-          // Compare logic to generate gorgeous role-specific live Toast Notifications
-          const localUser = JSON.parse(sessionStorage.getItem('current_user') || 'null') || currentUser;
-          
-          if (!isFirstLoadRef.current && localUser) {
-            const currentRole = localUser.role;
-            const currentUserId = localUser.id;
-
-            // 1. Check for New Orders (Created)
-            o2.forEach(newOrder => {
-              const oldMatch = prevOrdersRef.current.find(o => o.id === newOrder.id);
-              if (!oldMatch) {
-                if (currentRole === 'admin' || currentRole === 'receptionist') {
-                  addToast(
-                    `🔔 实时新提报：【${newOrder.branchName}】新增了货品订单\n商品：${newOrder.productName} (${newOrder.specs}) x ${newOrder.quantity} 件\n状态：待前台确认`,
-                    'info'
-                  );
-                } else if (currentRole === 'branch' && newOrder.branchId === currentUserId) {
-                  addToast(
-                    `📝 本店提报成功！订单已进入待确认状态 [编号: ${newOrder.orderNo}]`,
-                    'success'
-                  );
-                }
-              } else {
-                // 2. Check for Order modifications (Status changes or prices)
-                if (oldMatch.status !== newOrder.status) {
-                  const statusLabels: Record<string, string> = {
-                    'pending_confirm': '待前台确认',
-                    'pending_purchase': '待汇总采购',
-                    'purchased': '已采购待到货',
-                    'completed': '已完成(已入库)',
-                    'cancelled': '已取消',
-                    'rejected': '被驳回'
-                  };
-                  const oldLabel = statusLabels[oldMatch.status] || oldMatch.status;
-                  const newLabel = statusLabels[newOrder.status] || newOrder.status;
-
-                  if (currentRole === 'admin' || currentRole === 'receptionist' || currentRole === 'purchasing') {
-                    addToast(
-                      `🔄 【状态变更】订单 [${newOrder.orderNo}]\n商品: ${newOrder.productName} x ${newOrder.quantity}\n分店: ${newOrder.branchName}\n变更为：[${newLabel}]`,
-                      'success'
-                    );
-                  } else if (currentRole === 'branch' && newOrder.branchId === currentUserId) {
-                    addToast(
-                      `📦 【本店订单状态已变更】您提报的 ${newOrder.productName} x ${newOrder.quantity}\n当前最新状态变更为：【${newLabel}】`,
-                      newOrder.status === 'rejected' ? 'error' : 'success'
-                    );
-                  }
-                }
-
-                // Check for Price Updates (Auditing/reception price updates)
-                if ((oldMatch.currentPrice !== newOrder.currentPrice) || (oldMatch.previousPrice !== newOrder.previousPrice)) {
-                  if (currentRole === 'admin' || (currentRole === 'branch' && newOrder.branchId === currentUserId)) {
-                    addToast(
-                      `💰 【核算价变动】订单 [${newOrder.orderNo}]\n货品: ${newOrder.productName}\n核算单价变更为：¥${newOrder.currentPrice || 0} / 件`,
-                      'success'
-                    );
-                  }
-                }
-              }
-            });
-
-            // 3. New / Modified Purchase Orders (POs)
-            po2.forEach(newPo => {
-              const oldMatch = prevPurchaseOrdersRef.current.find(po => po.id === newPo.id);
-              if (!oldMatch) {
-                if (currentRole === 'admin' || currentRole === 'purchasing') {
-                  addToast(
-                    `📦 【新增采购订货单】[${newPo.poNo}]\n供应商：${newPo.supplier}\n计划汇总订购货品数量：${newPo.totalQuantity} 件`,
-                    'warning'
-                  );
-                } else if (currentRole === 'branch') {
-                  // Find if any of our orders were included in this PO
-                  const ourOrdersInPo = o2.filter(o => o.branchId === currentUserId && newPo.orderIds.includes(o.id));
-                  if (ourOrdersInPo.length > 0) {
-                    addToast(
-                      `✈️ 【采购发运中】您的 ${ourOrdersInPo.length} 项货品已汇总到采购单 [${newPo.poNo}]，由供应商 [${newPo.supplier}] 进行备货发运！`,
-                      'info'
-                    );
-                  }
-                }
-              } else {
-                if (oldMatch.factoryStatus !== newPo.factoryStatus) {
-                  const label = newPo.factoryStatus === 'confirmed' ? '厂家已确认接收' : '未接收';
-                  if (currentRole === 'admin' || currentRole === 'purchasing') {
-                    addToast(
-                      `🏭 【厂家来信】采购单 [${newPo.poNo}] 厂家接单状态已更新：${label}`,
-                      'warning'
-                    );
-                  }
-                }
-                if (oldMatch.expectedArrivalDate !== newPo.expectedArrivalDate && newPo.expectedArrivalDate) {
-                  if (currentRole === 'admin' || currentRole === 'purchasing' || currentRole === 'receptionist') {
-                    addToast(
-                      `🗓️ 【预计提货日更新】采购单 [${newPo.poNo}]\n供应商：${newPo.supplier}\n交付排产日期：${newPo.expectedArrivalDate}`,
-                      'warning'
-                    );
-                  }
-                }
-                if (oldMatch.status !== newPo.status) {
-                  const poLabels: Record<string, string> = {
-                    'pending_arrival': '发运中/待收货',
-                    'completed': '全额到货',
-                    'cancelled': '已取消'
-                  };
-                  const statusLabel = poLabels[newPo.status] || newPo.status;
-                  if (currentRole === 'admin' || currentRole === 'purchasing' || currentRole === 'receptionist') {
-                    addToast(
-                      `📦 【采购单交付状态变动】采购单 [${newPo.poNo}]\n最新状态：【${statusLabel}】`,
-                      'success'
-                    );
-                  }
-                }
-              }
-            });
-
-            // 4. Inventory Stock updates (Deduction and replenishment)
-            inv2.forEach(newInv => {
-              const oldMatch = prevInventoryRef.current.find(i => i.productCode === newInv.productCode);
-              if (oldMatch && oldMatch.currentStock !== newInv.currentStock) {
-                const diff = newInv.currentStock - oldMatch.currentStock;
-                const changeDetail = diff > 0 ? `入库上架增加 ${diff} 件` : `出库扣减 ${Math.abs(diff)} 件`;
-                
-                if (currentRole === 'admin' || currentRole === 'purchasing' || currentRole === 'receptionist') {
-                  addToast(
-                    `📦 【库存精细变动】货品：[${newInv.productName}] \n变动动作：${changeDetail}\n当前库内现存：${newInv.currentStock} 件`,
-                    diff > 0 ? 'success' : 'info'
-                  );
-                }
-              }
-            });
-          }
-
-          // Save current snapshots for future comparisons
-          prevOrdersRef.current = o2;
-          prevPurchaseOrdersRef.current = po2;
-          prevInventoryRef.current = inv2;
-
-          setUsers(u2);
-          setOrders(o2);
-          setPurchaseOrders(po2);
-          setLogs(lg2);
-          setSystemConfig(cfg2);
-        });
-
-      } catch (err) {
-        console.error('Failed to load DB resources:', err);
-      } finally {
-        setIsLoading(false);
+        const parsed = JSON.parse(savedMap);
+        if (parsed && typeof parsed === 'object' && !parsed['总部']) {
+          parsed['总部'] = ['总部总仓'];
+          localStorage.setItem('salesRegionStoreMap', JSON.stringify(parsed));
+          setRegionStoreMap(parsed);
+        } else {
+          setRegionStoreMap(parsed);
+        }
+      } catch (e) {
+        setRegionStoreMap(DEFAULT_REGION_STORE_MAP);
       }
+    } else {
+      localStorage.setItem('salesRegionStoreMap', JSON.stringify(DEFAULT_REGION_STORE_MAP));
+      setRegionStoreMap(DEFAULT_REGION_STORE_MAP);
     }
 
-    loadAllData();
+    // 2. Load Transactions
+    const savedTx = localStorage.getItem('salesTransactions');
+    if (savedTx) {
+      setTransactions(JSON.parse(savedTx));
+    } else {
+      localStorage.setItem('salesTransactions', JSON.stringify(DEFAULT_TRANSACTIONS));
+      setTransactions(DEFAULT_TRANSACTIONS);
+    }
+
+    // 3. Load Stocks
+    const savedInv = localStorage.getItem('salesInventory');
+    if (savedInv) {
+      try {
+        const parsed = JSON.parse(savedInv);
+        if (Array.isArray(parsed) && !parsed.some(item => item.store === '总部总仓')) {
+          const combined = [...DEFAULT_INVENTORY.filter(i => i.store === '总部总仓'), ...parsed];
+          localStorage.setItem('salesInventory', JSON.stringify(combined));
+          setInventory(combined);
+        } else {
+          setInventory(parsed);
+        }
+      } catch (e) {
+        setInventory(DEFAULT_INVENTORY);
+      }
+    } else {
+      localStorage.setItem('salesInventory', JSON.stringify(DEFAULT_INVENTORY));
+      setInventory(DEFAULT_INVENTORY);
+    }
+
+    // 4. Load User Account Registry
+    const savedUsers = localStorage.getItem('salesUsers');
+    if (savedUsers) {
+      setUsers(JSON.parse(savedUsers));
+    } else {
+      localStorage.setItem('salesUsers', JSON.stringify(DEFAULT_USERS));
+      setUsers(DEFAULT_USERS);
+    }
+
+    // 5. Hydrate login session
+    const activeSession = sessionStorage.getItem('salesCurrentUser');
+    if (activeSession) {
+      setCurrentUser(JSON.parse(activeSession));
+    } else {
+      setIsLoginOpen(true);
+    }
+  }, []);
+
+  // Redirect non-bosses if they land on the boss dashboard
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'boss' && activeTab === 'bossDashboard') {
+      setActiveTab('overview');
+    }
+  }, [currentUser, activeTab]);
+
+  // ERP State Synchronizer & DbService subscription
+  const loadErpStates = useCallback(async () => {
+    try {
+      const [ord, po, cfg, usr] = await Promise.all([
+        DbService.getOrders(),
+        DbService.getPurchaseOrders(),
+        DbService.getConfig(),
+        DbService.getUsers()
+      ]);
+      setErpOrders(ord);
+      setErpPurchaseOrders(po);
+      setErpSystemConfig(cfg);
+      setErpUsers(usr);
+    } catch (e) {
+      console.error("Error loading ERP states:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Initialize DbService database and subcollections
+    DbService.initialize().then(() => {
+      loadErpStates();
+    });
+
+    // Subscribe to live listener hooks
+    const unsubscribe = DbService.onChange(() => {
+      loadErpStates();
+    });
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      unsubscribe();
     };
-  }, [currentUser]);
+  }, [loadErpStates]);
 
-  // Set default tab based on logged role
+  // Handle user login and routing options with strict role-based separation
   useEffect(() => {
     if (currentUser) {
-      if (currentUser.role === 'branch') {
-        setActiveTab('branch-orders');
+      if (currentUser.role === 'boss') {
+        // Boss is restricted strictly to BI dashboards only, no ERP system access
+        if (systemMode !== 'BI') {
+          setSystemMode('BI');
+        }
+        if (activeTab.startsWith('erp')) {
+          setActiveTab('bossDashboard');
+        }
+      } else if (currentUser.role === 'branch') {
+        // Branch manager is restricted strictly to their own Order Entry workspace
+        if (systemMode !== 'ERP') {
+          setSystemMode('ERP');
+        }
+        if (activeTab !== 'erpBranchOrder') {
+          setActiveTab('erpBranchOrder');
+        }
       } else if (currentUser.role === 'receptionist') {
-        setActiveTab('reception-confirm');
+        // Warehouse receptionist is restricted strictly to delivery receptions checks
+        if (systemMode !== 'ERP') {
+          setSystemMode('ERP');
+        }
+        if (activeTab !== 'erpReception') {
+          setActiveTab('erpReception');
+        }
       } else if (currentUser.role === 'purchasing') {
-        setActiveTab('purchasing-pos');
+        // Purchasing is restricted strictly to purchasing and replenishment tabs
+        if (systemMode !== 'ERP') {
+          setSystemMode('ERP');
+        }
+        if (activeTab !== 'erpPurchase' && activeTab !== 'erpReplenish') {
+          setActiveTab('erpPurchase');
+        }
       } else {
-        setActiveTab('dashboard'); // Admin default
-      }
-    }
-  }, [currentUser]);
-
-  // 除了超级管理员，账号同一时间仅限一人登录。他人上线则挤掉旧会话并踢下线。
-  useEffect(() => {
-    if (bypassKickout) return; // 超管预设已授权多浏览器页签、跨设备免密多角色同账号并存模式
-    if (currentUser && currentUser.role !== 'admin') {
-      const dbMatchedUser = users.find(u => u.id === currentUser.id);
-      if (dbMatchedUser && dbMatchedUser.sessionToken) {
-        const localSess = sessionStorage.getItem('current_session_token') || localStorage.getItem(`session_token_${currentUser.id}`);
-        
-        // 解析 Session Token 中的时间戳进行安全比对，防范异步加载产生的时序紊乱（闪退/无法登录等情况）
-        const getSessionTimestamp = (tokenStr: string | null | undefined): number => {
-          if (!tokenStr || !tokenStr.startsWith('sess_')) return 0;
-          const parts = tokenStr.split('_');
-          const ts = parseInt(parts[1], 10);
-          return isNaN(ts) ? 0 : ts;
-        };
-
-        const dbTs = getSessionTimestamp(dbMatchedUser.sessionToken);
-        const localTs = getSessionTimestamp(localSess || currentUser.sessionToken);
-
-        // 仅当数据库中的新会话时间戳严格大于本地当前登录会话的时间戳时，才确认为被后登录的会话顶替
-        if (dbMatchedUser.sessionToken !== localSess && dbTs > localTs) {
-          alert(`⚠️ 安全警示：您的账号 [${currentUser.username}] 已在其他设备或新浏览器页签登录！当前会话已直接被强制下线。`);
-          setCurrentUser(null);
-          sessionStorage.removeItem('current_session_token');
-          localStorage.removeItem(`session_token_${currentUser.id}`);
+        // Admins and Region managers are allowed to toggle between both modes, guard standard mode-tab boundaries
+        if (systemMode === 'BI' && activeTab.startsWith('erp')) {
+          setActiveTab('overview');
+        } else if (systemMode === 'ERP' && !activeTab.startsWith('erp')) {
+          if (currentUser.role === 'region_manager') {
+            setActiveTab('erpBranchOrder');
+          } else {
+            setActiveTab('erpDashboard');
+          }
         }
       }
     }
-  }, [users, currentUser, bypassKickout]);
+  }, [currentUser, systemMode, activeTab]);
 
-  // Load and subscribe to DB Changes
-
-  const getMatchedUser = (typed: string) => {
-    const search = typed.trim();
-    let matched = users.find(u => u.username.trim() === search);
-    if (!matched && search.toLowerCase() === 'admin') {
-      matched = users.find(u => u.id === 'u_admin');
+  // Mode boundaries guard (reinforcement)
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.role === 'boss' && systemMode !== 'BI') {
+        setSystemMode('BI');
+        setActiveTab('bossDashboard');
+      } else {
+        const isErpSpecific = currentUser.role === 'branch' || currentUser.role === 'receptionist' || currentUser.role === 'purchasing';
+        if (isErpSpecific && systemMode !== 'ERP') {
+          setSystemMode('ERP');
+          if (currentUser.role === 'branch') setActiveTab('erpBranchOrder');
+          if (currentUser.role === 'receptionist') setActiveTab('erpReception');
+          if (currentUser.role === 'purchasing') setActiveTab('erpPurchase');
+        }
+      }
     }
-    return matched;
+  }, [systemMode, currentUser]);
+
+  // Sync state mutation helper back to physical storage and local state
+  const syncUsersList = (newUsersList: User[]) => {
+    localStorage.setItem('salesUsers', JSON.stringify(newUsersList));
+    setUsers(newUsersList);
   };
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!usernameInput.trim()) {
-      alert('请输入您的系统登录账号');
-      return;
+  const syncInventoryList = (newInvList: InventoryItem[]) => {
+    localStorage.setItem('salesInventory', JSON.stringify(newInvList));
+    setInventory(newInvList);
+  };
+
+  const syncTransactionsList = (newTxList: Transaction[]) => {
+    localStorage.setItem('salesTransactions', JSON.stringify(newTxList));
+    setTransactions(newTxList);
+  };
+
+  const syncRegionStoreMap = (newMap: Record<string, string[]>) => {
+    localStorage.setItem('salesRegionStoreMap', JSON.stringify(newMap));
+    setRegionStoreMap(newMap);
+  };
+
+  // Reset core user data action
+  const handleResetUserData = () => {
+    localStorage.setItem('salesUsers', JSON.stringify(DEFAULT_USERS));
+    setUsers(DEFAULT_USERS);
+    addToast('✅ 系统用户账号已重置，其余自定义账号已移除！密码还原为 123。', 'success');
+  };
+
+  // ==========================================
+  // Manager Restrictions & Dynamic Guards
+  // ==========================================
+  const isRegionManager = currentUser?.role === 'region_manager';
+  const designatedRegion = currentUser?.region || '';
+
+  // Get stores allowed under the current user's role limits
+  const storesInCurrentRegion = useMemo(() => {
+    if (isRegionManager) {
+      return regionStoreMap[designatedRegion] || [];
+    }
+    // Admin or Boss can see all stored stores in database mapping
+    return Object.values(regionStoreMap).flat();
+  }, [isRegionManager, designatedRegion, regionStoreMap]);
+
+  // Restrict region filter dropdown list based on current user
+  const regionDropdownList = useMemo(() => {
+    if (isRegionManager) {
+      return [designatedRegion];
+    }
+    return Object.keys(regionStoreMap).filter(Boolean).sort();
+  }, [isRegionManager, designatedRegion, regionStoreMap]);
+
+  // Restrict stores lists in dropdown lists based on dynamic region chosen
+  const storeDropdownList = useMemo(() => {
+    const parentRegion = isRegionManager ? designatedRegion : globalRegion;
+    if (parentRegion === 'all') {
+      return storesInCurrentRegion;
+    }
+    const regionStores = regionStoreMap[parentRegion] || [];
+    return regionStores.filter(s => storesInCurrentRegion.includes(s));
+  }, [isRegionManager, designatedRegion, globalRegion, regionStoreMap, storesInCurrentRegion]);
+
+  // Sync locked filters for regional manager automatically
+  useEffect(() => {
+    if (isRegionManager && designatedRegion) {
+      setGlobalRegion(designatedRegion);
+      setAppliedRegion(designatedRegion);
+    }
+  }, [isRegionManager, designatedRegion]);
+
+  // Unique categories helper
+  const uniqueCategories = useMemo(() => {
+    return Array.from(new Set(transactions.map(t => t.category).filter(Boolean))).sort();
+  }, [transactions]);
+
+  // Unique years helper
+  const uniqueYears = useMemo(() => {
+    return Array.from(new Set(transactions.map(t => t.date.slice(0, 4)).filter(Boolean))).sort();
+  }, [transactions]);
+
+  // ==========================================
+  // Actions
+  // ==========================================
+  const handleLogin = (userIn: string, passIn: string): boolean => {
+    // 1. Check BI Users list
+    let matched = users.find(u => u.username === userIn && (u.password === passIn || u.pin === passIn));
+    
+    // 2. Check ERP Users list (state)
+    if (!matched && erpUsers && erpUsers.length > 0) {
+      matched = erpUsers.find(u => u.username === userIn && (u.pin === passIn || u.password === passIn));
     }
 
-    const matched = getMatchedUser(usernameInput);
+    // 3. Check raw local storage fallback
     if (!matched) {
-      alert('系统未登记此登录账号，请更换或联系管理员分配');
-      return;
-    }
-
-    if (!matched.isActive) {
-      alert('此账户已被系统管理员禁用，请联系管理员激活');
-      return;
-    }
-
-    if (!pinInput) {
-      alert('请输入对应的安全 PIN 验证码');
-      return;
-    }
-
-    if (pinInput === matched.pin) {
-      const sessionToken = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-      sessionStorage.setItem('current_session_token', sessionToken);
-      localStorage.setItem(`session_token_${matched.id}`, sessionToken);
-
-      // If logging in as admin and existing database record username isn't 'admin' yet, normalize it
-      const finalUsername = matched.id === 'u_admin' ? 'admin' : matched.username;
-      const updatedUser: User = {
-        ...matched,
-        username: finalUsername,
-        sessionToken
-      };
-
       try {
-        await DbService.saveUser(updatedUser, { id: matched.id, name: finalUsername, role: matched.role });
-      } catch (err) {
-        console.error('更新会话Token失败', err);
+        const rawDbUsers = localStorage.getItem('db_users');
+        if (rawDbUsers) {
+          const parsed: User[] = JSON.parse(rawDbUsers);
+          if (Array.isArray(parsed)) {
+            matched = parsed.find(u => u.username === userIn && (u.pin === passIn || u.password === passIn));
+          }
+        }
+      } catch (e) {
+        console.error("Error reading fallback db_users:", e);
+      }
+    }
+
+    if (matched) {
+      setCurrentUser(matched);
+      sessionStorage.setItem('salesCurrentUser', JSON.stringify(matched));
+      setIsLoginOpen(false);
+      
+      let roleLabel = '成员';
+      if (matched.role === 'admin') {
+        roleLabel = matched.isViceAdmin ? '副系统管理员' : '系统最高管理员';
+      } else if (matched.role === 'boss') {
+        roleLabel = '老板/决策者';
+      } else if (matched.role === 'region_manager') {
+        roleLabel = `区域经理 (${matched.region || '大区'})`;
+      } else if (matched.role === 'purchasing') {
+        roleLabel = '采购';
+      } else if (matched.role === 'receptionist') {
+        roleLabel = '前台库管/验收员';
+      } else if (matched.role === 'branch') {
+        roleLabel = `分店店长 (${matched.branchName || '分舵'})`;
       }
 
-      setCurrentUser(updatedUser);
-      setPinInput('');
-      setUsernameInput('');
+      addToast(`🎉 欢迎登录系统，当前权限：${roleLabel}`, 'success');
+      return true;
+    }
+
+    // Fallback: check defaults directly in case state is syncing slowly
+    const fallbackMatched = DEFAULT_USERS.find(u => u.username === userIn && u.password === passIn);
+    if (fallbackMatched) {
+      setCurrentUser(fallbackMatched);
+      sessionStorage.setItem('salesCurrentUser', JSON.stringify(fallbackMatched));
+      const freshList = [...users];
+      if (!freshList.some(x => x.username === 'admin')) {
+        freshList.push(fallbackMatched);
+        syncUsersList(freshList);
+      }
+      setIsLoginOpen(false);
+      addToast(`🎉 管理员成功恢复默认登录！`, 'success');
+      return true;
+    }
+    return false;
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('salesCurrentUser');
+    setCurrentUser(null);
+    setIsLoginOpen(true);
+    addToast('🔒 安全登出系统，本地缓存保留', 'info');
+  };
+
+  const handleQueryApply = () => {
+    setAppliedRegion(globalRegion);
+    setAppliedStore(globalStore);
+    setAppliedCategory(globalCategory);
+    setAppliedYear(globalYear);
+    addToast('⚡ 全局筛选已更新！经营总览大屏图表已重构刷新。', 'info');
+  };
+
+  // ==========================================
+  // Render Filters Base
+  // ==========================================
+  // Filter core retail records for Overview Tab
+  const filteredRetailOnlyOverview = useMemo(() => {
+    return transactions.filter(t => {
+      if (t.sale_type !== 'store_to_customer') return false;
       
-      // Log login success
-      DbService.log(
-        matched.id,
-        finalUsername,
-        matched.role,
-        '自主登录',
-        `账号 [${finalUsername}] 验证成功且单人安全会话锁定，登录进入协同视角`
-      );
-    } else {
-      alert('安全验证失败：验证 PIN 码不匹配，请重新输入');
-      setPinInput('');
-    }
-  };
+      // Region Lock Check
+      const rowRegion = Object.keys(regionStoreMap).find(reg => regionStoreMap[reg].includes(t.store)) || '';
+      if (isRegionManager && rowRegion !== designatedRegion) return false;
 
-  const handleLogout = async () => {
-    if (currentUser) {
-      await DbService.log(
-        currentUser.id,
-        currentUser.username,
-        currentUser.role,
-        '自主登出',
-        `安全退出系统会话`
-      );
-      setCurrentUser(null);
-    }
-  };
+      // Applied values checks
+      if (appliedRegion !== 'all' && rowRegion !== appliedRegion) return false;
+      if (appliedStore !== 'all' && t.store !== appliedStore) return false;
+      if (appliedCategory !== 'all' && t.category !== appliedCategory) return false;
+      if (appliedYear !== 'all' && t.date.slice(0, 4) !== appliedYear) return false;
 
-  // Wrapper DB actions
-  const onSaveUser = async (user: User) => {
-    if (!currentUser) return;
-    const oldUser = users.find(u => u.id === user.id);
-    if (oldUser && oldUser.pin !== user.pin) {
-      await DbService.log(
-        currentUser.id,
-        currentUser.username,
-        currentUser.role,
-        '密码重置',
-        `管理员 [${currentUser.username}] 重置了账户 [${user.username}] 的登录 PIN 密码（免验证直改）`
-      );
-    }
-    await DbService.saveUser(user, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-  };
+      return true;
+    });
+  }, [transactions, appliedRegion, appliedStore, appliedCategory, appliedYear, isRegionManager, designatedRegion, regionStoreMap]);
 
-  const onDeleteUser = async (userId: string, username: string) => {
-    if (!currentUser) return;
-    await DbService.deleteUser(userId, username, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-  };
+  // Filter core stock list for Overview tab KPIs
+  const filteredInventoryOverview = useMemo(() => {
+    return inventory.filter(item => {
+      // Permission restrict
+      if (!storesInCurrentRegion.includes(item.store)) return false;
 
-  const onAddBranchOrders = async (items: any[], submissionDate?: string) => {
-    if (!currentUser) return;
-    await DbService.submitOrder(currentUser.id, currentUser.branchName || currentUser.username, items, submissionDate);
-  };
+      // Filter matches
+      const itemRegion = Object.keys(regionStoreMap).find(reg => regionStoreMap[reg].includes(item.store)) || '';
+      if (appliedRegion !== 'all' && itemRegion !== appliedRegion) return false;
+      if (appliedStore !== 'all' && item.store !== appliedStore) return false;
+      if (appliedCategory !== 'all' && item.category !== appliedCategory) return false;
 
-  const onConfirmOrdersByReception = async (orderIds: string[]) => {
-    if (!currentUser) return;
-    await DbService.batchConfirmOrders(orderIds, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-  };
+      return true;
+    });
+  }, [inventory, appliedRegion, appliedStore, appliedCategory, storesInCurrentRegion, regionStoreMap]);
 
-  const onGeneratePurchaseOrders = async (orderIds: string[], remarks: string) => {
-    if (!currentUser) return;
-    await DbService.generatePurchaseOrders(orderIds, { id: currentUser.id, name: currentUser.username, role: currentUser.role }, remarks);
-  };
+  // Selected filters subtitle string description
+  const kpiFilterDescriptorText = useMemo(() => {
+    const parts: string[] = [];
+    if (appliedRegion !== 'all') parts.push(appliedRegion);
+    if (appliedStore !== 'all') parts.push(appliedStore);
+    if (appliedCategory !== 'all') parts.push(appliedCategory);
+    if (appliedYear !== 'all') parts.push(`${appliedYear}年`);
+    return parts.length > 0 ? parts.join(' ｜ ') : '管辖全国大区';
+  }, [appliedRegion, appliedStore, appliedCategory, appliedYear]);
 
-  const onCreateDirectPurchaseOrder = async (supplier: string, orderDate: string, remarks: string, items: any[]) => {
-    if (!currentUser) return;
-    await DbService.createDirectPurchaseOrder(
-      supplier,
-      orderDate,
-      remarks,
-      items,
-      { id: currentUser.id, name: currentUser.username, role: currentUser.role }
-    );
-  };
-
-  const onSubmitPoToFactory = async (poId: string, factoryStatus: 'confirmed' | 'unconfirmed', expectedArrivalDate: string) => {
-    if (!currentUser) return;
-    await DbService.submitPoToFactory(poId, factoryStatus, expectedArrivalDate, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-  };
-
-  const onLogArrival = async (poId: string, itemArrivals: { orderId: string; receivedQty: number }[]) => {
-    if (!currentUser) return;
-    await DbService.logArrival(poId, itemArrivals, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-  };
-
-  const onReplenishShortage = async (payload: any) => {
-    if (!currentUser) return;
-    await DbService.replenishShortage(payload, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
-  };
-
-  const onConfigThresholdUpdate = async (newThreshold: number) => {
-    if (!currentUser) return;
-    await DbService.updateConfig(newThreshold, currentUser.username);
-  };
-
-  if (isLoading || !systemConfig) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 font-sans">
-        <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent mb-4"></div>
-        <div className="text-sm font-semibold text-slate-800">数据库及依赖框架初始同步中...</div>
-        <div className="text-xs text-slate-400 mt-1">首次接入将重置 seed 分店数据集</div>
-      </div>
-    );
-  }
-
-  // LOGIN PORTAL PAGE
-  if (!currentUser) {
-    return (
-      <div id="login_portal_wrapper" className="min-h-screen bg-gradient-to-tr from-slate-50 via-slate-100/80 to-blue-50/40 flex items-center justify-center p-4 md:p-8 font-sans select-none relative overflow-hidden">
-        {/* 背景轻量科技光晕 */}
-        <div className="absolute -top-[30%] -left-[20%] w-[70%] h-[70%] rounded-full bg-blue-500/5 blur-[120px] pointer-events-none" />
-        <div className="absolute -bottom-[20%] -right-[15%] w-[60%] h-[60%] rounded-full bg-blue-400/5 blur-[100px] pointer-events-none" />
-        
-        <motion.div 
-          initial={{ opacity: 0, y: 15, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-md bg-white rounded-3xl border border-slate-200/80 shadow-[0_25px_60px_-15px_rgba(30,58,138,0.06)] p-6 md:p-10 space-y-6 relative z-10 backdrop-blur-xs"
-        >
-          {/* 商业化极简标头 */}
-          <div className="text-center space-y-3">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full text-blue-700 text-[10px] sm:text-xs font-semibold tracking-wide uppercase mx-auto">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
-              企业级数智供应链协同
-            </div>
-            
-            <h1 className="text-xl md:text-2xl font-extrabold text-slate-850 tracking-tight flex items-center justify-center gap-3">
-              <span className="p-1.5 bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-xl shadow-md shadow-blue-500/10">
-                <Layers className="w-5 h-5" />
-              </span>
-              多分店订单协同管理系统
-            </h1>
-            
-            <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-              请输入系统分配的账号，验证后将开启专属供应链协同视窗
-            </p>
-          </div>
-
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
-            {/* 账号输入框 */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 tracking-wide flex items-center gap-1.5">
-                <span className="w-1 h-3 bg-blue-600 rounded-full"></span>
-                登录账号
-              </label>
-              <div className="relative">
-                <Users className="absolute left-3.5 top-2.5 w-4.5 h-4.5 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="请输入您的系统登录账号"
-                  value={usernameInput}
-                  onChange={e => setUsernameInput(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2 border border-slate-200 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-600 text-sm duration-150 text-slate-800"
-                />
-              </div>
-            </div>
-
-            {/* PIN码输入框 */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 tracking-wide flex items-center gap-1.5">
-                <span className="w-1 h-3 bg-blue-600 rounded-full"></span>
-                安全 PIN 验证码
-              </label>
-              <div className="relative">
-                <Key className="absolute left-3.5 top-2.5 w-4.5 h-4.5 text-slate-400" />
-                <input
-                  type="password"
-                  maxLength={10}
-                  placeholder="请输入您的安全 PIN 验证码"
-                  value={pinInput}
-                  onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
-                  className="w-full pl-10 pr-3 py-2 border border-slate-200 bg-white rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-600 text-sm duration-150 text-slate-800 placeholder:font-sans"
-                />
-              </div>
-            </div>
-
-            {/* 提交按钮 */}
-            <motion.button
-              type="submit"
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-              className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold rounded-xl text-xs shadow-md shadow-blue-500/10 hover:shadow-blue-500/20 duration-150 flex items-center justify-center gap-1.5 cursor-pointer leading-none mt-2 shrink-0"
-            >
-              验证并安全登录系统 <ArrowRight className="w-3.5 h-3.5" />
-            </motion.button>
-          </form>
-
-          <div className="text-center text-[10px] text-slate-400 pt-1 border-t border-slate-100 flex items-center justify-center gap-1 italic">
-            <Globe className="w-3 h-3 text-slate-300" />
-            分布式数据存储与高并发监听已就绪，全网订单数据实时动态连通。
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // MAIN RUNNING WORKSPACE
   return (
-    <div className="min-h-screen bg-slate-50 font-sans flex flex-col text-slate-800">
-      
-      {/* Top Header */}
-      <header className="bg-white border-b border-slate-150 sticky top-0 z-40 px-4 md:px-6 py-3 shrink-0">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          
-          {/* Logo Title */}
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 bg-blue-50 text-blue-700 rounded-lg">
-              <Layers className="w-4 h-4 md:w-5 md:h-5" />
-            </span>
-            <h1 className="text-xs md:text-sm lg:text-base font-bold text-slate-900 tracking-tight">
-              多分店订单协同管理系统
-            </h1>
-          </div>
+    <div className="flex h-screen bg-slate-50 text-slate-700 font-sans antialiased overflow-hidden">
+      {/* Sidebar Layout */}
+      {currentUser && (
+        <>
+          {/* Backdrop on Mobile */}
+          {isSidebarOpen && (
+            <div 
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 md:hidden" 
+              onClick={() => setIsSidebarOpen(false)} 
+            />
+          )}
 
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1 rounded-lg">
-              <div className="flex flex-col text-left">
-                <span className="font-bold text-slate-900 leading-none">{currentUser.username}</span>
-                <span className="text-[9px] text-slate-400 leading-none mt-0.5 uppercase font-semibold font-mono tracking-wider">
-                  {currentUser.role === 'admin' && (currentUser.username.includes('副') ? '副系统管理员' : '主系统管理员')}
-                  {currentUser.role === 'branch' && '分店业务人员'}
-                  {currentUser.role === 'receptionist' && '前台汇总审批'}
-                  {currentUser.role === 'purchasing' && '采购组主管'}
-                </span>
+          <aside 
+            className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#1a5c9e] text-white flex flex-col shadow-xl transition-transform duration-300 transform md:relative md:translate-x-0 ${
+              isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+            }`}
+          >
+            {/* Logo Brand Header */}
+            <div className="p-6 text-lg font-bold border-b border-blue-800/60 flex items-center gap-2.5 flex-shrink-0">
+              <div className="w-8 h-8 bg-white/10 text-white rounded-lg flex items-center justify-center font-bold text-base shadow-sm">
+                管
               </div>
-              
-              <button
-                onClick={() => setIsChangePasswordOpen(true)}
-                className="p-1 px-2.5 bg-white hover:bg-indigo-50/60 text-indigo-600 hover:text-indigo-800 border border-indigo-150 rounded-md transition-all cursor-pointer flex items-center gap-1 shrink-0 shadow-2xs"
-                title="修改登录密码"
+              <div className="min-w-0">
+                <span className="block font-bold text-sm leading-tight">进销存与决策集成看板</span>
+                <span className="block text-[9px] text-blue-200/70 font-semibold uppercase tracking-wider">Business Analytics Studio</span>
+              </div>
+            </div>
+
+            {/* Sidebar Navigation */}
+            <nav className="flex-1 py-4 overflow-y-auto space-y-1">
+              {/* Optional Portal Switcher: Non-boss admins & region managers only */}
+              {(currentUser?.role === 'admin' || currentUser?.role === 'region_manager') && (
+                <div className="px-4 pb-4">
+                  <div className="bg-black/20 p-1 rounded-xl flex items-center justify-between gap-1 border border-white/5">
+                    <button
+                      onClick={() => {
+                        setSystemMode('BI');
+                        setActiveTab('overview');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
+                        systemMode === 'BI'
+                           ? 'bg-white/15 text-white shadow-sm'
+                           : 'text-blue-200/60 hover:text-blue-100'
+                      }`}
+                    >
+                      <Activity className="w-3.5 h-3.5" />
+                      BI 智能大屏
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSystemMode('ERP');
+                        if (currentUser.role === 'region_manager') {
+                          setActiveTab('erpBranchOrder');
+                        } else {
+                          setActiveTab('erpDashboard');
+                        }
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
+                        systemMode === 'ERP'
+                           ? 'bg-emerald-500 text-white shadow-md'
+                           : 'text-blue-200/60 hover:text-blue-100'
+                      }`}
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      ERP 协同
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {systemMode === 'BI' ? (
+                <>
+                  <div className="px-6 py-1.5 text-xs font-bold text-blue-200/50 uppercase tracking-widest">
+                    数据分析驾驶舱
+                  </div>
+                  <button
+                    onClick={() => {
+                      setActiveTab('overview');
+                      setIsSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                      activeTab === 'overview'
+                        ? 'bg-white/10 border-white text-white font-bold'
+                        : 'bg-transparent border-transparent text-blue-100 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <LayoutDashboard className="w-4 h-4 mr-3" />
+                    经营总览大屏
+                  </button>
+
+                  <div className="px-6 py-1.5 pt-4 text-xs font-bold text-blue-200/50 uppercase tracking-widest">
+                    决策与报表
+                  </div>
+                  <button
+                    onClick={() => {
+                      setActiveTab('monthly');
+                      setIsSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                      activeTab === 'monthly'
+                        ? 'bg-white/10 border-white text-white font-bold'
+                        : 'bg-transparent border-transparent text-blue-100 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <CalendarDays className="w-4 h-4 mr-3" />
+                    分店零售月报 (店→客)
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('headWholesale');
+                      setIsSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                      activeTab === 'headWholesale'
+                        ? 'bg-white/10 border-white text-white font-bold'
+                        : 'bg-transparent border-transparent text-blue-100 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <Landmark className="w-4 h-4 mr-3" />
+                    总部批发决策 (总部→店)
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('inventory');
+                      setIsSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                      activeTab === 'inventory'
+                        ? 'bg-white/10 border-white text-white font-bold'
+                        : 'bg-transparent border-transparent text-blue-100 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <FolderKanban className="w-4 h-4 mr-3" />
+                    账面库存明细
+                  </button>
+
+                  {currentUser?.role === 'boss' && (
+                    <>
+                      <div className="px-6 py-1.5 pt-4 text-xs font-bold text-amber-200/50 uppercase tracking-widest">
+                        老板决策专区
+                      </div>
+                      <button
+                        onClick={() => {
+                          setActiveTab('bossDashboard');
+                          setIsSidebarOpen(false);
+                        }}
+                        className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                          activeTab === 'bossDashboard'
+                            ? 'bg-amber-500/10 border-amber-400 text-amber-300 font-bold'
+                            : 'bg-transparent border-transparent text-amber-100/70 hover:bg-amber-500/5 hover:text-amber-200'
+                        }`}
+                      >
+                        <TrendingUp className="w-4 h-4 mr-3 text-amber-400" />
+                        老板专属决策大屏
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="px-6 py-1.5 text-xs font-bold text-emerald-200/50 uppercase tracking-widest">
+                    协同物资订货 ERP
+                  </div>
+
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('erpDashboard');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                        activeTab === 'erpDashboard'
+                          ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 font-bold'
+                          : 'bg-transparent border-transparent text-emerald-200/70 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <Activity className="w-4 h-4 mr-3 text-emerald-400" />
+                      订货决策总览
+                    </button>
+                  )}
+
+                  {(currentUser?.role === 'admin' || currentUser?.role === 'region_manager' || currentUser?.role === 'branch') && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('erpBranchOrder');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                        activeTab === 'erpBranchOrder'
+                          ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 font-bold'
+                          : 'bg-transparent border-transparent text-emerald-200/70 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <ShoppingBag className="w-4 h-4 mr-3 text-emerald-400" />
+                      分店订货申报
+                    </button>
+                  )}
+
+                  {(currentUser?.role === 'admin' || currentUser?.role === 'purchasing') && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('erpPurchase');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                        activeTab === 'erpPurchase'
+                          ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 font-bold'
+                          : 'bg-transparent border-transparent text-emerald-200/70 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <ClipboardList className="w-4 h-4 mr-3 text-emerald-400" />
+                      采购下单管理
+                    </button>
+                  )}
+
+                  {(currentUser?.role === 'admin' || currentUser?.role === 'receptionist') && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('erpReception');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                        activeTab === 'erpReception'
+                          ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 font-bold'
+                          : 'bg-transparent border-transparent text-emerald-200/70 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <Truck className="w-4 h-4 mr-3 text-emerald-400" />
+                      到货入库验收
+                    </button>
+                  )}
+
+                  {(currentUser?.role === 'admin' || currentUser?.role === 'purchasing') && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('erpReplenish');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                        activeTab === 'erpReplenish'
+                          ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 font-bold'
+                          : 'bg-transparent border-transparent text-emerald-200/70 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <RefreshCw className="w-4 h-4 mr-3 text-emerald-400" />
+                      物资补货监控
+                    </button>
+                  )}
+
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('erpUsersSuppliers');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                        activeTab === 'erpUsersSuppliers'
+                          ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 font-bold'
+                          : 'bg-transparent border-transparent text-emerald-200/70 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <Users className="w-4 h-4 mr-3 text-emerald-400" />
+                      账号与供货管理
+                    </button>
+                  )}
+                </>
+              )}
+            </nav>
+
+            {/* Profile Block inside Sidebar */}
+            <div className="p-4 border-t border-blue-800/60 flex-shrink-0">
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5">
+                <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center font-bold text-white text-xs shadow-inner">
+                  {currentUser.username.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-white truncate">{currentUser.username}</div>
+                  <div className="text-[10px] text-blue-200/70 font-semibold truncate mt-0.5">
+                    {currentUser.role === 'admin' 
+                      ? (currentUser.isViceAdmin ? '副系统管理员' : '系统管理员') 
+                      : currentUser.role === 'boss' 
+                        ? '决策审阅人 (老板)' 
+                        : currentUser.role === 'region_manager'
+                          ? `区域经理 (${currentUser.region || '全区'})`
+                          : currentUser.role === 'purchasing'
+                            ? '采购'
+                            : currentUser.role === 'receptionist'
+                              ? '前台验收员'
+                              : currentUser.role === 'branch'
+                                ? `${currentUser.branchName || '分店店长'}`
+                                : '系统成员'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </>
+      )}
+
+      {/* Right Side Main Layout */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+        {/* Top Header */}
+        {currentUser ? (
+          <header className="h-16 bg-white border-b border-slate-100 flex items-center justify-between px-6 shadow-sm flex-shrink-0 z-30">
+            <div className="flex items-center gap-3">
+              {/* Hamburger Button on mobile */}
+              <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden cursor-pointer"
               >
-                <Key className="w-3.5 h-3.5" />
-                <span className="text-[10px] font-bold">修改密码</span>
+                <span className="sr-only">Open menu</span>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-base font-bold text-slate-800 leading-tight">
+                  {activeTab === 'overview' && '经营总览大屏 (数字驾驶舱)'}
+                  {activeTab === 'monthly' && '分店零售分析 (零售月报模型)'}
+                  {activeTab === 'headWholesale' && '总部批发决策 (供销供货大屏)'}
+                  {activeTab === 'inventory' && '账面库存监管 (库存实物明细)'}
+                  {activeTab === 'bossDashboard' && '老板专属经营分析大屏 (同期同比决策大屏)'}
+                  {activeTab === 'erpDashboard' && '订货排产决策大屏 (ERP 决策中枢)'}
+                  {activeTab === 'erpBranchOrder' && '分店订货申报单提交与溯源 (协同订货)'}
+                  {activeTab === 'erpPurchase' && '供货采购分配与合同管理 (ERP 采购单)'}
+                  {activeTab === 'erpReception' && '到货验收与实物入库校对 (前台库管)'}
+                  {activeTab === 'erpReplenish' && '缺货调剂及自主补货大屏幕 (补货大屏)'}
+                  {activeTab === 'erpUsersSuppliers' && '供应链往来单位与协同职位授权 (ERP 配置)'}
+                </h2>
+                <p className="text-[10px] text-slate-400 font-semibold mt-0.5 hidden sm:block">
+                  {activeTab === 'overview' && 'RTL & EXCEL DYNAMIC DATA INTEGRATED VIEW'}
+                  {activeTab === 'monthly' && 'RETAIL CROSS-TAB MONTHLY PROFITABILITY REPORT'}
+                  {activeTab === 'headWholesale' && 'WHOLESALE SHIPMENT STRATEGY CONTROL BOARD'}
+                  {activeTab === 'inventory' && 'BOOK VALUE QUANTITY MANAGEMENT'}
+                  {activeTab === 'bossDashboard' && 'BOSS STRATEGIC DECISION-MAKING & OUTLOOK ANALYSIS'}
+                  {activeTab === 'erpDashboard' && 'ERP SUPPLY CHAIN INTEGRATION MONITOR'}
+                  {activeTab === 'erpBranchOrder' && 'BRANCH REQUEST REPORTING & LIFECYCLE TRACING'}
+                  {activeTab === 'erpPurchase' && 'SUPPLIER ALLOCATION & COMPREHENSIVE PURCHASE PLANS'}
+                  {activeTab === 'erpReception' && 'WAREHOUSE DELIVERY RECEPTIONS & DISCONNECT CHECKS'}
+                  {activeTab === 'erpReplenish' && 'SUPPLIER SHORTAGE CALCULATOR & INVENTORY CORRECTION'}
+                  {activeTab === 'erpUsersSuppliers' && 'RELATIONS AND ERP ACCESS PERMISSIONS MANAGER'}
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Actions block */}
+            <div className="flex items-center gap-2">
+              {currentUser.role === 'admin' ? (
+                <button
+                  onClick={() => setIsUserMgmtOpen(true)}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-[#1a5c9e] bg-[#1a5c9e]/10 border border-[#1a5c9e]/20 hover:bg-[#1a5c9e]/15 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" /> 用户管理
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (confirm('确定将系统数据完全重设吗？将恢复默认销售库。')) {
+                      handleResetUserData();
+                    }
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50 border border-slate-200 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                  title="重置测试账号"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> 重载
+                </button>
+              )}
+
+              <button
+                onClick={() => setIsChangePwdOpen(true)}
+                className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-lg transition-all flex items-center gap-1 cursor-pointer border border-slate-200"
+              >
+                <Key className="w-3.5 h-3.5" /> 修改密码
               </button>
 
               <button
                 onClick={handleLogout}
-                className="p-1 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-slate-200 hover:border-rose-100 rounded-md transition-all cursor-pointer shrink-0"
-                title="登出系统"
+                className="px-2.5 py-1.5 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-all flex items-center gap-1 cursor-pointer border border-red-200"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <LogOut className="w-3.5 h-3.5" /> 登出
               </button>
             </div>
-          </div>
+          </header>
+        ) : null}
 
-        </div>
-      </header>
+        {/* Content Scrolling Pane */}
+        {currentUser ? (
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+            {/* General Filter Section Card */}
+            {systemMode === 'BI' && (
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col lg:flex-row lg:items-end justify-between gap-5 transition-all">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-1">
+                  {/* Region Select */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                      全局大区
+                    </label>
+                    <select
+                      disabled={isRegionManager}
+                      value={globalRegion}
+                      onChange={(e) => {
+                        setGlobalRegion(e.target.value);
+                        setGlobalStore('all'); // reset store sub-choices
+                      }}
+                      className="w-full px-3 py-2 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg outline-none focus:border-[#1a5c9e] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {!isRegionManager && <option value="all">全国分舵大区</option>}
+                      {regionDropdownList.map(reg => (
+                        <option key={reg} value={reg}>{reg}</option>
+                      ))}
+                    </select>
+                  </div>
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
-        
-        {/* Navigation Tabs based on Role */}
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2">
-          
-          {/* Admin Role Tabs */}
-          {currentUser.role === 'admin' && (
-            <>
-              <button
-                onClick={() => setActiveTab('dashboard')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                <span>管理看板</span>
-              </button>
+                  {/* Store select options */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                      门店分店
+                    </label>
+                    <select
+                      value={globalStore}
+                      onChange={(e) => setGlobalStore(e.target.value)}
+                      className="w-full px-3 py-2 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg outline-none focus:border-[#1a5c9e] cursor-pointer"
+                    >
+                      <option value="all">全部商铺门店</option>
+                      {storeDropdownList.map(st => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                  </div>
 
-              <button
-                onClick={() => setActiveTab('users-mgmt')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'users-mgmt' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>用户账号管理</span>
-              </button>
+                  {/* Category selector */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                      经营类别品类
+                    </label>
+                    <select
+                      value={globalCategory}
+                      onChange={(e) => setGlobalCategory(e.target.value)}
+                      className="w-full px-3 py-2 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg outline-none focus:border-[#1a5c9e] cursor-pointer"
+                    >
+                      <option value="all">全类别划分</option>
+                      {uniqueCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
 
-              <button
-                onClick={() => setActiveTab('branch-orders')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'branch-orders' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Building className="w-3.5 h-3.5" />
-                <span>分店采购提单</span>
-              </button>
+                  {/* Year filter dropdown */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                      销售年度
+                    </label>
+                    <select
+                      value={globalYear}
+                      onChange={(e) => setGlobalYear(e.target.value)}
+                      className="w-full px-3 py-2 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg outline-none focus:border-[#1a5c9e] cursor-pointer"
+                    >
+                      <option value="all">全部销售年度</option>
+                      {uniqueYears.map(yr => (
+                        <option key={yr} value={yr}>{yr}年</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-              <button
-                onClick={() => setActiveTab('reception-confirm')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'reception-confirm' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>前台审批汇总</span>
-              </button>
+                {/* General Apply query filters */}
+                <div className="flex items-center gap-2 flex-shrink-0 w-full lg:w-auto">
+                  <button
+                    onClick={handleQueryApply}
+                    className="w-full lg:w-auto px-5 py-2.5 bg-[#1a5c9e] hover:bg-[#154678] text-white font-bold text-xs rounded-lg shadow-sm transition-all text-center flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    查询
+                  </button>
+                  
+                  {!isRegionManager && (
+                    <button
+                      onClick={() => setIsRegionMapOpen(true)}
+                      className="w-full lg:w-auto px-4 py-2.5 text-[#1a5c9e] bg-[#1a5c9e]/5 hover:bg-[#1a5c9e]/10 text-xs font-bold border border-[#1a5c9e]/15 hover:border-[#1a5c9e]/30 rounded-lg transition-all text-center flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Settings className="w-3.5 h-3.5" /> 区域映射配置
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
-              <button
-                onClick={() => setActiveTab('purchasing-pos')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'purchasing-pos' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <ShoppingBag className="w-3.5 h-3.5" />
-                <span>采购流转管理</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('replenishment-mgmt')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'replenishment-mgmt' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <ShoppingBag className="w-3.5 h-3.5 text-indigo-505 text-indigo-500 font-bold" />
-                <span>补货单/采购单管理</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('shortage-reports')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 relative ${
-                  activeTab === 'shortage-reports' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
-                <span>欠货与补货分析</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('inventory-registry')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'inventory-registry' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-blue-500" />
-                <span>备货库库存与导入</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('order-query')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'order-query' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Search className="w-3.5 h-3.5" />
-                <span>每日订单明细一键查询</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('system-logs')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'system-logs' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Terminal className="w-3.5 h-3.5" />
-                <span>操作审计日志</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('sales-analysis')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'sales-analysis' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
-                <span>销售数据查看与分析</span>
-              </button>
-            </>
-          )}
-
-          {/* Branch Role tabs */}
-          {currentUser.role === 'branch' && (
-            <>
-              <button
-                onClick={() => setActiveTab('branch-orders')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'branch-orders' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Building className="w-3.5 h-3.5" />
-                <span>我的分店货品提报提单</span>
-              </button>
-
-              {currentUser.branchSalesEnabled && (
-                <button
-                  onClick={() => setActiveTab('sales-analysis')}
-                  className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'sales-analysis' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                  }`}
-                >
-                  <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>分店历史销售数据查询</span>
-                </button>
+            {/* Active Content rendering Tab Pane */}
+            <div className="pt-1 animate-in fade-in slide-in-from-bottom-2 duration-250 flex-grow">
+              {activeTab === 'overview' && (
+                <OverviewTab 
+                  transactions={filteredRetailOnlyOverview} 
+                  inventory={filteredInventoryOverview}
+                  filterLabel={kpiFilterDescriptorText}
+                />
               )}
-            </>
-          )}
 
-          {/* Receptionist Role limit */}
-          {currentUser.role === 'receptionist' && (
-            <>
-              <button
-                onClick={() => setActiveTab('reception-confirm')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === 'reception-confirm' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>全分店待审批订单汇总 ({orders.filter(o => o.status === 'pending_confirm').length}件)</span>
-              </button>
-              
-              <button
-                onClick={() => setActiveTab('order-query')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === 'order-query' ? 'bg-blue-605 bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-650 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <Search className="w-3.5 h-3.5" />
-                <span>每日订单明细一键查询</span>
-              </button>
-            </>
-          )}
+              {activeTab === 'monthly' && (
+                <MonthlyReportTab 
+                  transactions={transactions}
+                  inventory={inventory}
+                  storesInCurrentRegion={storesInCurrentRegion}
+                  regionStoreMap={regionStoreMap}
+                  onUpdateTransactionsList={(newList, msg) => {
+                    syncTransactionsList(newList);
+                    addToast(msg, 'success');
+                  }}
+                  onShowToast={addToast}
+                />
+              )}
 
-          {/* Purchasing Role limits */}
-          {currentUser.role === 'purchasing' && (
-            <>
-              <button
-                onClick={() => setActiveTab('purchasing-pos')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'purchasing-pos' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <ShoppingBag className="w-3.5 h-3.5" />
-                <span>采购并单汇总与到到货</span>
-              </button>
+              {activeTab === 'headWholesale' && (
+                <WholesaleTab 
+                  transactions={transactions}
+                  inventory={inventory}
+                  storesInCurrentRegion={storesInCurrentRegion}
+                  regionStoreMap={regionStoreMap}
+                  onUpdateTransactionsList={(newList, msg) => {
+                    syncTransactionsList(newList);
+                    addToast(msg, 'success');
+                  }}
+                  onShowToast={addToast}
+                />
+              )}
 
-              <button
-                onClick={() => setActiveTab('replenishment-mgmt')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'replenishment-mgmt' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <ShoppingBag className="w-3.5 h-3.5 text-indigo-500 font-bold" />
-                <span>补货单/采购单管理</span>
-              </button>
-              
-              <button
-                onClick={() => setActiveTab('shortage-reports')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'shortage-reports' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
-                <span>实时欠货报表与一键补货</span>
-              </button>
+              {activeTab === 'inventory' && (
+                <InventoryTab 
+                  inventory={inventory}
+                  storesInCurrentRegion={storesInCurrentRegion}
+                  onUpdateInventoryList={(newList, msg) => {
+                    syncInventoryList(newList);
+                    addToast(msg, 'success');
+                  }}
+                  onShowToast={addToast}
+                />
+              )}
 
-              <button
-                onClick={() => setActiveTab('inventory-registry')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'inventory-registry' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-blue-500" />
-                <span>总部备货与零库采购</span>
-              </button>
+              {activeTab === 'bossDashboard' && currentUser && (
+                <SalesAnalysisView 
+                  currentUser={currentUser}
+                />
+              )}
 
-              <button
-                onClick={() => setActiveTab('sales-analysis')}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'sales-analysis' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-100'
-                }`}
-              >
-                <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
-                <span>销售数据查看与分析</span>
-              </button>
-            </>
-          )}
+              {activeTab === 'erpDashboard' && (
+                <DashboardView 
+                  orders={erpOrders}
+                  systemConfig={erpSystemConfig || { id: 'global', shortageThreshold: 10, updatedAt: new Date().toISOString(), updatedBy: 'system' }}
+                  onConfigChange={async (newThreshold) => {
+                    await DbService.updateConfig(newThreshold, currentUser?.username || 'system');
+                    addToast(`🔧 系统缺货阈值已成功更新为：${newThreshold}件`, 'success');
+                  }}
+                  currentUser={currentUser}
+                />
+              )}
 
-        </div>
+              {activeTab === 'erpBranchOrder' && (
+                <BranchOrderView 
+                  orders={erpOrders}
+                  purchaseOrders={erpPurchaseOrders}
+                  onAddOrders={async (items, submissionDate) => {
+                    await DbService.submitOrder(currentUser?.id || 'u_branch', currentUser?.branchName || currentUser?.username || '黄石店', items, submissionDate);
+                    addToast('🎉 分店订单提交成功，自动汇总并触发多人协同追踪！', 'success');
+                  }}
+                  currentUser={currentUser}
+                />
+              )}
 
-        {/* Dynamic Render Subview according to selection */}
-        <div className="animate-fadeIn min-h-[400px]">
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              orders={orders}
-              systemConfig={systemConfig}
-              onConfigChange={onConfigThresholdUpdate}
-              currentUser={currentUser}
-            />
-          )}
+              {activeTab === 'erpPurchase' && (
+                <PurchasingView 
+                  orders={erpOrders}
+                  purchaseOrders={erpPurchaseOrders}
+                  onGeneratePos={async (orderIds, remarks) => {
+                    await DbService.generatePurchaseOrders(orderIds, { id: currentUser?.id || 'u_purchasing', name: currentUser?.username || '采购经理', role: currentUser?.role || 'purchasing' }, remarks);
+                    addToast('📄 采购单已拼盘合并生成，已同步关联至分店提报项！', 'success');
+                  }}
+                  onCreateDirectPo={async (supplier, orderDate, remarks, items) => {
+                    await DbService.createDirectPurchaseOrder(supplier, orderDate, remarks, items, { id: currentUser?.id || 'u_purchasing', name: currentUser?.username || '采购经理', role: currentUser?.role || 'purchasing' });
+                    addToast('📄 自建备货采购批次已顺利下达，进入货期管家！', 'success');
+                  }}
+                  onSubmitToFactory={async (poId, factoryStatus, expectedArrival) => {
+                    await DbService.submitPoToFactory(poId, factoryStatus, expectedArrival, { id: currentUser?.id || 'u_purchasing', name: currentUser?.username || '采购经理', role: currentUser?.role || 'purchasing' });
+                    addToast(`🏭 已向供货厂家确认货期批次，状态更新为：${factoryStatus === 'confirmed' ? '已排产受托确认' : '未排产待厂家受托'}`, 'success');
+                  }}
+                  onLogArrival={async (poId, itemArrivals) => {
+                    await DbService.logArrival(poId, itemArrivals, { id: currentUser?.id || 'u_purchasing', name: currentUser?.username || '采购经理', role: currentUser?.role || 'purchasing' });
+                    addToast('📝 成功登记并复核此次采购到货明细，库存已自动累加！', 'success');
+                  }}
+                  currentUser={currentUser}
+                />
+              )}
 
-          {activeTab === 'users-mgmt' && (
-            <UserManagementView
-              users={users}
-              onSaveUser={onSaveUser}
-              onDeleteUser={onDeleteUser}
-              currentUser={currentUser}
-            />
-          )}
+              {activeTab === 'erpReception' && (
+                <ReceptionConfirmView 
+                  orders={erpOrders}
+                  onConfirmOrders={async (orderIds) => {
+                    await DbService.batchConfirmOrders(orderIds, { id: currentUser?.id || 'u_rec', name: currentUser?.username || '前台验收员', role: 'receptionist' });
+                    addToast('✅ 分店提报订单已完成前台初审核对，移交并就绪采购流程！', 'success');
+                  }}
+                  currentUser={currentUser}
+                />
+              )}
 
-          {activeTab === 'branch-orders' && (
-            <BranchOrderView
-              orders={orders}
-              purchaseOrders={purchaseOrders}
-              onAddOrders={onAddBranchOrders}
-              currentUser={currentUser}
-            />
-          )}
+              {activeTab === 'erpReplenish' && (
+                <ReplenishmentMgmtView 
+                  currentUser={currentUser}
+                />
+              )}
 
-          {activeTab === 'reception-confirm' && (
-            <ReceptionConfirmView
-              orders={orders}
-              onConfirmOrders={onConfirmOrdersByReception}
-              currentUser={currentUser}
-            />
-          )}
+              {activeTab === 'erpUsersSuppliers' && (
+                <UserManagementView 
+                  users={erpUsers}
+                  onSaveUser={async (usr) => {
+                    await DbService.saveUser(usr, { id: currentUser?.id || 'admin', name: currentUser?.username || '管理员', role: 'admin' });
+                    addToast('👤 多人体系账号已更新同步！', 'success');
+                  }}
+                  onDeleteUser={async (userId, uname) => {
+                    await DbService.deleteUser(userId, uname, { id: currentUser?.id || 'admin', name: currentUser?.username || '管理员', role: 'admin' });
+                    addToast('👤 协作子账号已成功销户注销！', 'success');
+                  }}
+                  currentUser={currentUser}
+                />
+              )}
+            </div>
 
-          {activeTab === 'purchasing-pos' && (
-            <PurchasingView
-              orders={orders}
-              purchaseOrders={purchaseOrders}
-              onGeneratePos={onGeneratePurchaseOrders}
-              onCreateDirectPo={onCreateDirectPurchaseOrder}
-              onSubmitToFactory={onSubmitPoToFactory}
-              onLogArrival={onLogArrival}
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeTab === 'shortage-reports' && (
-            <ShortageReportView
-              orders={orders}
-              systemConfig={systemConfig}
-              onReplenish={onReplenishShortage}
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeTab === 'inventory-registry' && (
-            <InventoryView
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeTab === 'replenishment-mgmt' && (
-            <ReplenishmentMgmtView
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeTab === 'system-logs' && (
-            <LogsView
-              logs={logs}
-            />
-          )}
-
-          {activeTab === 'order-query' && (
-            <OrderQueryView
-              orders={orders}
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeTab === 'sales-analysis' && (
-            <SalesAnalysisView
-              currentUser={currentUser}
-            />
-          )}
-        </div>
-
-      </main>
-
-      {/* Persistent Footer */}
-      <footer className="bg-white border-t border-slate-150 py-3 px-4 text-center text-[10px] text-slate-400 font-sans shrink-0">
-        多分店订单协同管理系统 © 2026. Designed with Inter & JetBrains Mono display typography. All rights reserved.
-      </footer>
-
-      {/* Real-time Toast Notifications Container (Interactive Role-scoped Alerts) */}
-      <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
-        <AnimatePresence>
-          {toasts.map(toast => (
-            <motion.div
-              key={toast.id}
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9, y: -10 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-              className={`pointer-events-auto p-4 rounded-xl shadow-xl border flex items-start gap-3 bg-white/95 backdrop-blur-sm ${
-                toast.type === 'success' ? 'border-emerald-200 bg-emerald-50/95 text-emerald-900 shadow-emerald-100/50' :
-                toast.type === 'warning' ? 'border-amber-200 bg-amber-50/95 text-amber-900 shadow-amber-100/50' :
-                toast.type === 'error' ? 'border-rose-200 bg-rose-50/95 text-rose-900 shadow-rose-100/50' :
-                'border-blue-200 bg-blue-50/95 text-blue-900 shadow-blue-105/50'
-              }`}
-            >
-              <div className="text-base select-none shrink-0 mt-0.5">
-                {toast.type === 'success' ? '⚡' :
-                 toast.type === 'warning' ? '📦' :
-                 toast.type === 'error' ? '⚠️' : '🔔'}
-              </div>
-              <div className="flex-1 text-xs font-semibold whitespace-pre-line leading-relaxed font-sans">
-                {toast.text}
-              </div>
-              <button
-                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer transition-colors pointer-events-auto text-xs font-bold shrink-0 self-start select-none pl-1"
-                aria-label="Close Notification"
-              >
-                ✕
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
+            <footer className="py-4 text-center text-xs text-slate-400">
+              销售与账面经营决策系统 v2.4 ｜ 本地安全缓存存储 ｜ 完美适配大区锁定权限
+            </footer>
+          </div>
+        ) : null}
       </div>
 
-      {/* Change Password Modal */}
-      <AnimatePresence>
-        {isChangePasswordOpen && (
-          <div id="change_password_modal_overlay" className="fixed inset-0 z-[9990] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="w-full max-w-md bg-white rounded-3xl border border-slate-200 p-6 md:p-8 shadow-2xl relative z-10"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
-                <div className="flex items-center gap-2">
-                  <span className="p-1.5 bg-indigo-50 text-indigo-700 rounded-lg">
-                    <Key className="w-5 h-5" />
-                  </span>
-                  <h3 id="change_password_title" className="text-sm md:text-base font-bold text-slate-905">
-                    安全中心：修改账户登录密码
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsChangePasswordOpen(false);
-                    setOldPinInput('');
-                    setNewPinInput('');
-                    setConfirmNewPinInput('');
-                  }}
-                  className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
+      {/* Modals Containers */}
+      <LoginModal 
+        isOpen={isLoginOpen} 
+        onLogin={handleLogin}
+        onResetUsers={handleResetUserData}
+      />
 
-              <div className="mb-4 text-xs text-slate-500 leading-relaxed bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/60 font-semibold">
-                📢 <span className="text-indigo-700 font-bold">更新须知：</span>
-                密码属于认证系统的安全凭据，将进行全程加密，在此修改后原登录账号名称不变，仅 PIN 码密码会更新。
-              </div>
+      <UserManagementModal 
+        isOpen={isUserMgmtOpen}
+        onClose={() => setIsUserMgmtOpen(false)}
+        users={users}
+        onAddUser={(name, role, reg, pass) => {
+          if (users.some(u => u.username === name)) {
+            addToast(`❌ 用户账号 ${name} 已存在！`, 'error');
+            return false;
+          }
+          const addition: User = { username: name, role, region: reg, password: pass };
+          const list = [...users, addition];
+          syncUsersList(list);
+          addToast(`✅ 成功添加新系统账号 [${name}]`, 'success');
+          return true;
+        }}
+        onDeleteUser={(name) => {
+          const clean = users.filter(x => x.username !== name);
+          syncUsersList(clean);
+          addToast(`🗑️ 用户 [${name}] 已成功彻底注销账户！`, 'success');
+        }}
+        onResetPassword={(name, fresh) => {
+          const mod = users.map(u => u.username === name ? { ...u, password: fresh } : u);
+          syncUsersList(mod);
+          // If resetting self, update current details too
+          if (currentUser && currentUser.username === name) {
+            const selfObj = { ...currentUser, password: fresh };
+            setCurrentUser(selfObj);
+            sessionStorage.setItem('salesCurrentUser', JSON.stringify(selfObj));
+          }
+          addToast(`🔒 用户 [${name}] 的登录凭证密码已被重设，立即生效。`, 'success');
+        }}
+      />
 
-              <form onSubmit={handleChangePasswordSubmit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <span className="w-1 h-3 bg-indigo-600 rounded-full"></span>
-                    当前安全 PIN 码密码 (验证旧密码)
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    maxLength={10}
-                    placeholder="请输入您当前正在使用的登录 PIN 码"
-                    value={oldPinInput}
-                    onChange={e => setOldPinInput(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-3.5 py-2 border border-slate-200 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-600 text-sm duration-150 text-slate-800 font-mono tracking-widest"
-                  />
-                </div>
+      <ChangePwdModal 
+        isOpen={isChangePwdOpen}
+        onClose={() => setIsChangePwdOpen(false)}
+        currentUser={currentUser}
+        onConfirmChange={(oldPass, newPass) => {
+          if (!currentUser) return false;
+          const userDB = users.find(u => u.username === currentUser.username);
+          if (!userDB || userDB.password !== oldPass) {
+            return false; //old verification failure
+          }
+          const modUsers = users.map(u => u.username === currentUser.username ? { ...u, password: newPass } : u);
+          syncUsersList(modUsers);
+          const activeSelf = { ...currentUser, password: newPass };
+          setCurrentUser(activeSelf);
+          sessionStorage.setItem('salesCurrentUser', JSON.stringify(activeSelf));
+          addToast('🎉 您的个人密码修改保存成功，请妥善保管。', 'success');
+          return true;
+        }}
+      />
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <span className="w-1 h-3 bg-emerald-600 rounded-full"></span>
-                    设置新 PIN 码密码 (4-8位数字)
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    maxLength={10}
-                    placeholder="请设置新 PIN 码密码（必须是数字）"
-                    value={newPinInput}
-                    onChange={e => setNewPinInput(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-3.5 py-2 border border-slate-200 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-600 text-sm duration-150 text-slate-800 font-mono tracking-widest"
-                  />
-                </div>
+      <RegionMappingModal 
+        isOpen={isRegionMapOpen}
+        onClose={() => setIsRegionMapOpen(false)}
+        regionStoreMap={regionStoreMap}
+        onSaveMappings={(newMap) => {
+          syncRegionStoreMap(newMap);
+          // Auto update transactional region maps
+          addToast('🔄 区域组织架构映射更新完毕并同步全局！', 'success');
+        }}
+        onShowToast={addToast}
+      />
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <span className="w-1 h-3 bg-emerald-600 rounded-full"></span>
-                    确认新 PIN 码密码 (重新输入一次)
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    maxLength={10}
-                    placeholder="再次输入新密码进行确认"
-                    value={confirmNewPinInput}
-                    onChange={e => setConfirmNewPinInput(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-3.5 py-2 border border-slate-200 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-600 text-sm duration-150 text-slate-800 font-mono tracking-widest"
-                  />
-                </div>
-
-                <div className="flex gap-2.5 pt-3 font-sans">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsChangePasswordOpen(false);
-                      setOldPinInput('');
-                      setNewPinInput('');
-                      setConfirmNewPinInput('');
-                    }}
-                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer text-center duration-150"
-                  >
-                    取消修改
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-500/15 duration-150 cursor-pointer"
-                  >
-                    提交安全更新
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
+      {/* Persistent notifications toasts wrapper */}
+      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   );
 }

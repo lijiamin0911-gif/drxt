@@ -1112,6 +1112,7 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
                       </div>
                     </th>
                   ))}
+                  <th className="p-3 font-semibold text-center w-36 text-slate-800 bg-rose-50/10">主管合规核对</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1155,7 +1156,7 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
                       if (col.key === 'qtyOwed') {
                         return (
                           <td className="p-3 text-center bg-rose-50/30 text-rose-600 font-mono font-extrabold text-sm" key="qtyOwed">
-                            {item.qtyOwed} 件
+                            {"qtyOwed" in item ? (item as any).qtyOwed : item.quantity - (item.receivedQty || 0)} 件
                           </td>
                         );
                       }
@@ -1166,12 +1167,40 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
 
                       return null;
                     })}
+                    <td className="p-3 text-center border-l border-slate-100" onClick={e => e.stopPropagation()}>
+                      {item.isOwedConfirmedByReception ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-teal-600 bg-teal-50 border border-teal-100 px-2 py-0.5 rounded-md">
+                          ✓ 前台确认已无欠数
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!window.confirm(`确认该笔订单 [${item.orderNo}]（${item.productName}）对分店并无欠数，核定通过，以便后续采购安全删除或结转该疑问单吗？`)) return;
+                            try {
+                              await DbService.confirmOrderNoOwedByReception(item.id, {
+                                id: currentUser.id,
+                                name: currentUser.username,
+                                role: currentUser.role
+                              });
+                              alert('前台确认无欠成功！已同步赋能该单据在采购列表中的核减/直接删除权限。');
+                            } catch (err: any) {
+                              alert(err.message || '操作失败');
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded font-bold text-[10px] cursor-pointer transition-colors shadow-2xs"
+                          title="签署会签意见：核实并确认该条并不拖欠"
+                        >
+                          🟢 确认无欠款
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 
                 {filteredShortages.length === 0 && (
                   <tr>
-                    <td colSpan={shortageCols.length} className="p-16 text-center text-slate-400">
+                    <td colSpan={shortageCols.length + 1} className="p-16 text-center text-slate-400">
                       <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2 stroke-[1.5]" />
                       <p className="font-semibold text-slate-700 text-xs">好消息，未查找当前状态的任何厂家拖欠货品！</p>
                       <p className="text-[10px] text-slate-400 mt-1">

@@ -56,6 +56,42 @@ const SEED_USERS: User[] = [
     isActive: true,
     pin: '1111',
     createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u_vice_admin',
+    username: '副管理员',
+    role: 'admin',
+    isViceAdmin: true,
+    isActive: true,
+    pin: '1111',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u_purchasing',
+    username: '采购员',
+    role: 'purchasing',
+    isActive: true,
+    pin: '1111',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u_receptionist',
+    username: '前台验收员',
+    role: 'receptionist',
+    isActive: true,
+    pin: '1111',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u_branch',
+    username: '黄石店店长',
+    role: 'branch',
+    branchName: '黄石店',
+    branchSalesEnabled: true,
+    branchStockEnabled: true,
+    isActive: true,
+    pin: '1111',
+    createdAt: new Date().toISOString()
   }
 ];
 
@@ -1490,6 +1526,141 @@ export class DbService {
       operator.role,
       '驳回退回订单',
       `操作人 [${operator.name}] 驳回退回了订单: ${order.orderNo}，目标状态：${targetStatus === 'rejected' ? '已退回分店' : targetStatus === 'pending_confirm' ? '待前台确认' : '待采购汇总'}，理由：${reason}`
+    );
+    this.triggerChange();
+  }
+
+  // --- Receptionist Confirming Order has No Shortages ('无欠确认') ---
+  public static async confirmOrderNoOwedByReception(orderId: string, operator: { id: string; name: string; role: string }): Promise<void> {
+    const orders = await this.getOrders();
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      throw new Error('订单未找到');
+    }
+    order.isOwedConfirmedByReception = true;
+    await this.saveOrder(order, operator);
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '前台确认无欠',
+      `前台核对确认订单 ${order.orderNo} (${order.productName}) 已不拖欠分店货品（标记无欠）`
+    );
+    this.triggerChange();
+  }
+
+  // --- Split / Create Carry-over Sub-order for Shortage ('生成新订单补发') ---
+  public static async createCarryOverOrder(orderId: string, operator: { id: string; name: string; role: string }): Promise<void> {
+    const orders = await this.getOrders();
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      throw new Error('订单未找到');
+    }
+    const shortageQty = order.quantity - (order.receivedQty || 0);
+    if (shortageQty <= 0) {
+      throw new Error('此订单不处于拖欠欠货状态，无需补发新单');
+    }
+
+    // Create a new order row for the shortage amount
+    const newOrderNo = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
+    const newOrder: Order = {
+      id: 'o_' + Math.random().toString(36).substring(2, 9),
+      orderNo: newOrderNo,
+      branchId: order.branchId,
+      branchName: order.branchName,
+      productCode: order.productCode,
+      productName: order.productName,
+      specs: order.specs,
+      quantity: shortageQty,
+      receivedQty: 0,
+      status: 'pending_purchase', // direct to purchasing so it's ready to be re-ordered
+      supplier: order.supplier,
+      orderType: order.orderType || 'conventional',
+      remark: `【核增拆补发新单】源自未满足的前置欠货单：${order.orderNo}`,
+      createdAt: new Date().toISOString(),
+      merchandiserName: order.merchandiserName,
+      isUrgent: order.isUrgent
+    };
+
+    // Update original order's quantity to equal receivedQty, so that the shortage is resolved
+    order.quantity = order.receivedQty || 0;
+    // original order also gets marked resolved/completed/updated
+    if (order.quantity === 0) {
+      order.status = 'cancelled';
+      order.cancelReason = '由于缺货部分合并到新补单，原0实签单作废';
+    } else {
+      order.status = 'completed';
+    }
+
+    await this.saveOrder(order, operator);
+    await this.saveOrder(newOrder, operator);
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '生成补发新单',
+      `针对原拖欠订单 ${order.orderNo} 拆分生成的补发订单 ${newOrderNo} (数量: ${shortageQty}) 已成功录入待采购。原单拖欠部分已结转。`
+    );
+    this.triggerChange();
+  }
+
+  // --- Edit Order Details by Purchasing ---
+  public static async editOrderDetails(orderId: string, updatedFields: Partial<Order>, operator: { id: string; name: string; role: string }): Promise<void> {
+    const orders = await this.getOrders();
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      throw new Error('订单未找到');
+    }
+    const oldQty = order.quantity;
+    const oldSpecs = order.specs;
+
+    Object.assign(order, updatedFields);
+    await this.saveOrder(order, operator);
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '修改订单内容',
+      `采购修改了订单 ${order.orderNo} (${order.productName})。原规格: ${oldSpecs} -> 新规格: ${order.specs}，原申购数: ${oldQty} -> 新数: ${order.quantity}`
+    );
+    this.triggerChange();
+  }
+
+  // --- Delete Doubtful Order by Purchasing (with shortages checks) ---
+  public static async deleteOrderByPurchasing(orderId: string, operator: { id: string; name: string; role: string }): Promise<void> {
+    const orders = await this.getOrders();
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      throw new Error('订单未找到');
+    }
+
+    const shortageQty = order.quantity - (order.receivedQty || 0);
+    const hasShortage = order.status === 'purchased' && shortageQty > 0;
+
+    if (hasShortage && !order.isOwedConfirmedByReception) {
+      throw new Error('权限拦截：该条明细目前仍有拖欠分店的数量。请先由【前台】在欠货表核对并点击“确认无欠”，或者先在一侧【生成补发新单】补位放行后，采购方可作废或直接删除。');
+    }
+
+    // Proceed to delete
+    if (isFirebaseConfigured && db) {
+      try {
+        await deleteDoc(doc(db, 'orders', orderId));
+      } catch (e) {
+        handleFirestoreError(e, OperationType.DELETE, `orders/${orderId}`);
+      }
+    } else {
+      const filtered = orders.filter(o => o.id !== orderId);
+      setLocalData('db_orders', filtered);
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '采购删除疑问订单',
+      `采购人员 [${operator.name}] 删除了有疑问的订单: ${order.orderNo} (${order.productName})。商品编码: ${order.productCode}, 数量: ${order.quantity}。原状态: ${order.status}。`
     );
     this.triggerChange();
   }

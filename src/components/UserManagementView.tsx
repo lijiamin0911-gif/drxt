@@ -268,11 +268,13 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
         ["账号名称（必填，唯一例: 城东分店）", "权限身份（必填：分店 / 采购 / 前台 / 管理员）", "关联分店名称（仅分店填，必须和实际名称一致）", "登录密码PIN码（推荐至少4位数字）", "是否启用（是 / 否）"]
       ];
 
-      const roleNameMap: Record<Role, string> = {
+      const roleNameMap: Partial<Record<Role, string>> = {
         'admin': '管理员',
         'branch': '分店',
         'receptionist': '前台',
-        'purchasing': '采购'
+        'purchasing': '采购',
+        'boss': '老板/管理者',
+        'region_manager': '区域经理'
       };
 
       users.forEach(u => {

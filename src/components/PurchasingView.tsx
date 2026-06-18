@@ -21,9 +21,10 @@ import {
   X,
   Building
 } from 'lucide-react';
-import { Order, PurchaseOrder, User, Product, Supplier } from '../types';
+import { Order, PurchaseOrder, User, Product, Supplier, SalesRecord } from '../types';
 import { DbService } from '../lib/dbService';
 import ExportButton from './ExportButton';
+import * as XLSX from 'xlsx';
 
 interface PurchasingViewProps {
   orders: Order[];
@@ -44,8 +45,15 @@ export default function PurchasingView({
   onLogArrival,
   currentUser 
 }: PurchasingViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'generate' | 'manage' | 'direct' | 'cancelled'>('generate');
+  const [activeSubTab, setActiveSubTab] = useState<'generate' | 'manage' | 'direct' | 'cancelled' | 'sales_history'>('generate');
   const [showPrices, setShowPrices] = useState(false);
+  
+  // States for sales reference/history with multi-select of year & month
+  const [salesRecords, setSalesRecords] = useState<SalesRecord[]>([]);
+  const [selectedYears, setSelectedYears] = useState<string[]>(['2025', '2026']);
+  const [selectedMonths, setSelectedMonths] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  const [salesBranchFilter, setSalesBranchFilter] = useState<string>('all');
+  const [salesSearchQuery, setSalesSearchQuery] = useState<string>('');
   
   // Load suppliers and approved products for manual creator
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -66,6 +74,9 @@ export default function PurchasingView({
     DbService.getUsers().then(usersList => {
       setProcurementStaff(usersList.filter(u => u.role === 'purchasing' || u.role === 'admin' || u.role === 'receptionist'));
     });
+    DbService.getSalesRecords().then(records => {
+      setSalesRecords(records);
+    });
   }, [orders]); // Refresh when orders or system refreshes
 
   React.useEffect(() => {
@@ -84,6 +95,51 @@ export default function PurchasingView({
       loadSalesRefs();
     }
   }, [allProducts]);
+
+  const generateMockSalesRecords = async () => {
+    if (allProducts.length === 0) {
+      alert('请先等待货品数据加载完毕！');
+      return;
+    }
+    const branches = ['黄石店', '中山路店', '北京路旗舰店', '青山大药房', '后湖大药房'];
+    const years = ['2024', '2025', '2026'];
+    const mockRecords: SalesRecord[] = [];
+    
+    let idx = 0;
+    for (const year of years) {
+      for (let monthNum = 1; monthNum <= 12; monthNum++) {
+        const monthStr = `${year}-${String(monthNum).padStart(2, '0')}`;
+        for (const branch of branches) {
+          for (const prod of allProducts) {
+            // deterministic but varied quantities based on product code & month
+            const codeSum = prod.productCode.split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+            const baseQty = (codeSum % 35) + 2;
+            const seasonalMultiplier = 1 + Math.sin((monthNum / 12) * Math.PI) * 0.4;
+            const qty = Math.round(baseQty * seasonalMultiplier * (1 + (idx % 3) * 0.1));
+            const amount = qty * 45; 
+            
+            mockRecords.push({
+              id: `mock_sale_${year}_${monthNum}_${branch}_${prod.productCode}_${idx++}`,
+              month: monthStr,
+              branchName: branch,
+              productCode: prod.productCode,
+              productName: prod.productName,
+              quantity: qty,
+              amount: amount
+            });
+          }
+        }
+      }
+    }
+    
+    try {
+      await DbService.saveSalesRecords(mockRecords, { id: currentUser.id, name: currentUser.username, role: currentUser.role });
+      setSalesRecords(mockRecords);
+      alert('🔮 已成功在后台为您生成并持久化了近三年 (2024 - 2026) 5 个主要分店的所有货品月度销售流水账，已多维汇总呈现！');
+    } catch (e: any) {
+      alert('生成模拟数据失败: ' + e.message);
+    }
+  };
 
   const handleUpdateOrderMerchandiser = async (orderId: string, merchandiserName: string) => {
     try {
@@ -115,6 +171,175 @@ export default function PurchasingView({
     { productCode: '', productName: '', specs: '', quantity: 1, previousPrice: undefined, currentPrice: undefined }
   ]);
   const [isSubmittingDirect, setIsSubmittingDirect] = useState(false);
+  const [showDirectImportPanel, setShowDirectImportPanel] = useState(false);
+  const [directImportText, setDirectImportText] = useState('');
+
+  const handlePastedTextDirectImport = () => {
+    if (!directImportText.trim()) {
+      alert('请先输入或粘贴多行商品数据！排布格式支持：[商品编码,商品名称,型号规格,采购数量,前次单价,本次单价]');
+      return;
+    }
+
+    const lines = directImportText.split('\n');
+    const newItems: any[] = [];
+    let parsedCount = 0;
+
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+
+      // split by tab, comma, or space
+      let parts = line.split('\t');
+      if (parts.length < 2) {
+        parts = line.split(',');
+      }
+      if (parts.length < 2) {
+        parts = line.split(/[ ]{2,}/); // 2 or more spaces
+      }
+      if (parts.length < 2) {
+        parts = line.split(' '); // single space fallback
+      }
+
+      const p0 = (parts[0] || '').trim();
+      const p1 = (parts[1] || '').trim();
+      const p2 = (parts[2] || '').trim();
+      const p3 = parseInt((parts[3] || '1').trim(), 10) || 1;
+      const p4 = parseFloat((parts[4] || '0').trim()) || 0;
+      const p5 = parseFloat((parts[5] || '0').trim()) || 0;
+
+      if (!p0 && !p1) continue;
+
+      const matched = allProducts.find(
+        p => p.productCode.trim().toLowerCase() === p0.toLowerCase()
+      );
+
+      if (matched) {
+        newItems.push({
+          productCode: matched.productCode,
+          productName: matched.productName,
+          specs: matched.specs,
+          quantity: p3,
+          previousPrice: p4 || undefined,
+          currentPrice: p5 || undefined
+        });
+      } else {
+        newItems.push({
+          productCode: p0 ? p0.toUpperCase() : 'NEW-' + Math.floor(1000 + Math.random() * 9000),
+          productName: p1 || '直属自建新品',
+          specs: p2 || '规格补足',
+          quantity: p3,
+          previousPrice: p4 || undefined,
+          currentPrice: p5 || undefined
+        });
+      }
+      parsedCount++;
+    }
+
+    if (newItems.length === 0) {
+      alert('未识别到有效的多行商品特征，支持商品编码、姓名、规格、订货数量');
+      return;
+    }
+
+    const isOnlyEmpty = directItems.length === 1 && directItems[0].productCode === '';
+    if (isOnlyEmpty) {
+      setDirectItems(newItems);
+    } else {
+      setDirectItems([...directItems, ...newItems]);
+    }
+    
+    setDirectImportText('');
+    setShowDirectImportPanel(false);
+    alert(`文本批量代录匹配完成！已为您自动扩充追加了 ${parsedCount} 款采购货条目。`);
+  };
+
+  const handleFileDirectImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        const newItems: any[] = [];
+        let headerSkipped = false;
+        let parsedCount = 0;
+
+        for (const row of rawJson) {
+          if (!Array.isArray(row) || row.length === 0) continue;
+
+          const col0Str = String(row[0] || '').trim();
+          if (
+            !headerSkipped &&
+            (col0Str.includes('商品编码') ||
+              col0Str.includes('产品') ||
+              col0Str.includes('CODE') ||
+              col0Str.includes('代') ||
+              col0Str.includes('编'))
+          ) {
+            headerSkipped = true;
+            continue;
+          }
+
+          const code = String(row[0] || '').trim();
+          const name = String(row[1] || '').trim();
+          const specs = String(row[2] || '').trim();
+          const qtyVal = parseInt(String(row[3] || '1'), 10) || 1;
+          const prevPrice = parseFloat(String(row[4] || '')) || undefined;
+          const currPrice = parseFloat(String(row[5] || '')) || undefined;
+
+          if (!code && !name) continue;
+
+          const matched = allProducts.find(
+            p => p.productCode.trim().toLowerCase() === code.trim().toLowerCase()
+          );
+
+          if (matched) {
+            newItems.push({
+              productCode: matched.productCode,
+              productName: matched.productName,
+              specs: matched.specs,
+              quantity: Math.max(1, qtyVal),
+              previousPrice: prevPrice,
+              currentPrice: currPrice
+            });
+          } else {
+            newItems.push({
+              productCode: code ? code.toUpperCase() : 'NEW-' + Math.floor(1000 + Math.random() * 9000),
+              productName: name || '新品直批备货',
+              specs: specs || '常规规格',
+              quantity: Math.max(1, qtyVal),
+              previousPrice: prevPrice,
+              currentPrice: currPrice
+            });
+          }
+          parsedCount++;
+        }
+
+        if (newItems.length === 0) {
+          alert('Excel数据行格式不符：商品编码作为第一列，商品名称作为第二列，数量第四列');
+          return;
+        }
+
+        const isOnlyEmpty = directItems.length === 1 && directItems[0].productCode === '';
+        if (isOnlyEmpty) {
+          setDirectItems(newItems);
+        } else {
+          setDirectItems([...directItems, ...newItems]);
+        }
+        setShowDirectImportPanel(false);
+        alert(`一键大批量 Excel 代读取完成！成功将 ${parsedCount} 行采购详单同步追溯。`);
+      } catch (err) {
+        console.error(err);
+        alert('读取 Excel 工作簿或 CSV 失败，请确认表格文件正常。');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   const handleDirectItemProductChange = (idx: number, productCode: string) => {
     const matched = allProducts.find(p => p.productCode === productCode);
@@ -615,6 +840,17 @@ export default function PurchasingView({
           <span>新增独立采购单 (如库存单)</span>
         </button>
         <button
+          onClick={() => setActiveSubTab('sales_history')}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+            activeSubTab === 'sales_history' 
+              ? 'bg-white text-blue-800 shadow-sm' 
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+          title="分店月度销售量对比分析参考"
+        >
+          <span>📊 分店月度销量/历史销售参考</span>
+        </button>
+        <button
           onClick={() => setActiveSubTab('cancelled')}
           className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
             activeSubTab === 'cancelled' 
@@ -960,7 +1196,29 @@ export default function PurchasingView({
                                 <table className="w-full text-left min-w-[700px]">
                                   <thead>
                                     <tr className="text-slate-400 border-b border-slate-100 text-[9px] font-extrabold uppercase">
-                                      <th className="py-2 px-3 w-10 text-center">状态</th>
+                                      <th className="py-2 px-3 w-10 text-center">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const branchIds = branchOrders.map(o => o.id);
+                                            const allChecked = branchIds.every(id => selectedOrderIds.includes(id));
+                                            if (allChecked) {
+                                              setSelectedOrderIds(prev => prev.filter(id => !branchIds.includes(id)));
+                                            } else {
+                                              setSelectedOrderIds(prev => Array.from(new Set([...prev, ...branchIds])));
+                                            }
+                                          }}
+                                          className="text-slate-400 hover:text-blue-600 transition-colors inline-block cursor-pointer"
+                                          title="全选/反选该分店本期所有申报单"
+                                        >
+                                          {branchOrders.every(o => selectedOrderIds.includes(o.id)) ? (
+                                            <CheckSquare className="w-4.5 h-4.5 text-blue-600" />
+                                          ) : (
+                                            <Square className="w-4.5 h-4.5 text-slate-350" />
+                                          )}
+                                        </button>
+                                      </th>
                                       <th className="py-2 px-3">申领商品明细</th>
                                       <th className="py-2 px-3">型号规格</th>
                                       <th className="py-2 px-3 text-center bg-blue-50/20 text-blue-900">分店订单量</th>
@@ -1543,15 +1801,62 @@ export default function PurchasingView({
                 <span>🛒 补货详单列表</span>
                 <span className="text-[10px] text-slate-400 font-normal">（可选择自动拉入库内已核准的标准商品，亦可纯手动录入）</span>
               </h4>
-              <button
-                type="button"
-                onClick={handleAddDirectItemRow}
-                className="flex items-center gap-1 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-md text-xs font-bold transition-all cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>新增一栏货品款式</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDirectImportPanel(!showDirectImportPanel)}
+                  className="flex items-center gap-1 px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md text-xs font-bold transition-all cursor-pointer"
+                >
+                  <span>📥 导入当次订单 (Excel/文本)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddDirectItemRow}
+                  className="flex items-center gap-1 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-md text-xs font-bold transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新增一栏货品款式</span>
+                </button>
+              </div>
             </div>
+
+            {showDirectImportPanel && (
+              <div className="p-4 bg-amber-50/40 border border-amber-200/60 rounded-xl space-y-4 text-left">
+                <div>
+                  <h5 className="font-bold text-slate-800 text-xs text-amber-900">📥 智能采购订单导入</h5>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    请选择直接读取 Excel / CSV 文件，或在下方输入框粘贴多行货品字段（由空格/Tab或逗号分割，列顺序：商品编码、名称、规格、订单量、上次价、本次价）。
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-bold text-slate-600">方案 A：读取 Excel 工作簿 / CSV 表格 (.xlsx, .csv)</label>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleFileDirectImport}
+                      className="block w-full text-xs text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-bold text-slate-600">方案 B：直接复制微信/QQ货品文字批量粘贴</label>
+                    <textarea
+                      placeholder="格式如：&#10;PROD-A01 九牧暗装水龙头 SS-901 10 15.5 16.0&#10;PROD-B05 飞利浦吊灯 PL-M50W 25 45.0 46.5"
+                      value={directImportText}
+                      onChange={e => setDirectImportText(e.target.value)}
+                      className="w-full text-xs p-2 bg-white border border-slate-200 rounded-lg h-24 focus:ring-1 focus:ring-amber-500 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={handlePastedTextDirectImport}
+                      className="px-4 py-1.5 bg-amber-650 hover:bg-amber-700 text-white rounded font-bold text-xs cursor-pointer shadow-2xs"
+                    >
+                      ⚡ 识别并导入粘贴板文本
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="overflow-x-auto border border-slate-100 rounded-xl">
               <table className="w-full text-left text-xs min-w-[750px]">
@@ -1781,6 +2086,360 @@ export default function PurchasingView({
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {activeSubTab === 'sales_history' && (
+        <div className="bg-white p-5 border border-slate-100 rounded-xl space-y-6 text-left shadow-sm">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm md:text-base flex items-center gap-2">
+                <span className="p-1 bg-blue-50 text-blue-600 rounded">📊</span>
+                全国分店月度销量 & 历史销售数量参考系统
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                此页面专为采购跟单决策量身订做。可一键钻取各主要分店在不同年份、月份下的累计采购提报与消费流水，降低库存积压。
+              </p>
+            </div>
+            
+            {salesRecords.length > 0 && (
+              <button
+                onClick={generateMockSalesRecords}
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-650 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                title="重置或生成全新模拟销量账"
+              >
+                <span>🔁 重置/重新生成演示销量</span>
+              </button>
+            )}
+          </div>
+
+          {/* If No Data Screen */}
+          {salesRecords.length === 0 ? (
+            <div className="p-12 border-2 border-dashed border-slate-200 rounded-2xl text-center max-w-2xl mx-auto space-y-4 my-6">
+              <span className="text-5xl block animate-pulse">📈</span>
+              <h4 className="font-extrabold text-slate-800 text-base">体验未激活：暂缺历史销量流水数据</h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                当前系统数据库中尚未导入或同步分店以往周期的月度销售数量总帐。我们为您准备了极简的数据填充器，只需轻点下方按钮，系统将立即在后台生成并写入 <strong className="text-blue-600">近三年 (2024 - 2026) 5 大分店、所有已登记货项</strong> 的高保真模拟销售销量。
+              </p>
+              <button
+                type="button"
+                onClick={generateMockSalesRecords}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 mx-auto"
+              >
+                <span>🔮 一键一秒注入三年模拟演示销售数据集</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Filter Area */}
+              <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:p-5 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Search Query */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 block">🔍 搜索商品</label>
+                    <input
+                      type="text"
+                      placeholder="检索商品名称、货号或首字母..."
+                      value={salesSearchQuery}
+                      onChange={e => setSalesSearchQuery(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-white border border-slate-250 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 text-slate-800"
+                    />
+                  </div>
+
+                  {/* Branch Select */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 block">🏪 统计统计分店</label>
+                    <select
+                      value={salesBranchFilter}
+                      onChange={e => setSalesBranchFilter(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-white border border-slate-250 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 text-slate-800 font-semibold"
+                    >
+                      <option value="all">📁 全国全分店总合计 (五大主要分店)</option>
+                      {Array.from(new Set(salesRecords.map(r => r.branchName))).map(b => (
+                        <option key={b} value={b}>🏪 {b}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Multi-Select Year */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 block">📅 年限多选汇总 ({selectedYears.length}个活跃年份)</label>
+                    <div className="flex flex-wrap items-center gap-3 p-1.5 bg-white border border-slate-250 rounded-lg min-h-[38px] px-3">
+                      {Array.from(new Set(salesRecords.map(r => r.month.split('-')[0]))).sort().map(y => {
+                        const isChecked = selectedYears.includes(y);
+                        return (
+                          <label key={y} className="flex items-center gap-1 text-xs text-slate-700 font-semibold cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                if (isChecked) {
+                                  setSelectedYears(selectedYears.filter(year => year !== y));
+                                } else {
+                                  setSelectedYears([...selectedYears, y]);
+                                }
+                              }}
+                              className="rounded text-blue-600 cursor-pointer focus:ring-1 focus:ring-blue-500 w-3.5 h-3.5"
+                            />
+                            <span>{y}年</span>
+                          </label>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allYears = Array.from(new Set(salesRecords.map(r => r.month.split('-')[0]))).sort();
+                          setSelectedYears(selectedYears.length === allYears.length ? [] : allYears);
+                        }}
+                        className="ml-auto text-[10px] text-blue-600 hover:text-blue-800 font-extrabold cursor-pointer"
+                      >
+                        {selectedYears.length === Array.from(new Set(salesRecords.map(r => r.month.split('-')[0]))).length ? '全不选' : '快捷全选'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Multi-Select Months Panels */}
+                <div className="space-y-2 border-t border-slate-200/60 pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-700">🗓️ 活跃月份多选参考栏 ({selectedMonths.length}个选定月份)</span>
+                    
+                    {/* Month shortcuts */}
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])}
+                        className="px-2 py-0.5 bg-slate-200/60 hover:bg-slate-200 text-slate-700 font-extrabold rounded text-[9px] cursor-pointer"
+                      >
+                        全年全选
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMonths([1, 2, 3, 4, 5, 6])}
+                        className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-extrabold rounded text-[9px] cursor-pointer"
+                      >
+                        上半年 (1-6月)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMonths([7, 8, 9, 10, 11, 12])}
+                        className="px-2 py-0.5 bg-teal-50 hover:bg-teal-100 text-teal-700 font-extrabold rounded text-[9px] cursor-pointer"
+                      >
+                        下半年 (7-12月)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMonths([])}
+                        className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold rounded text-[9px] cursor-pointer"
+                      >
+                        清选空
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-12 gap-2 bg-white p-3 rounded-lg border border-slate-250">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => {
+                      const isChecked = selectedMonths.includes(m);
+                      return (
+                        <label 
+                          key={m} 
+                          className={`flex items-center justify-center gap-1.5 py-1.5 px-1 rounded-md border text-xs font-bold cursor-pointer select-none transition-all ${
+                            isChecked 
+                              ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-3xs' 
+                              : 'bg-slate-50/55 hover:bg-slate-50 text-slate-400 border-slate-150'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              if (isChecked) {
+                                setSelectedMonths(selectedMonths.filter(month => month !== m));
+                              } else {
+                                setSelectedMonths([...selectedMonths, m].sort((a,b)=>a-b));
+                              }
+                            }}
+                            className="rounded text-blue-600 focus:ring-0 cursor-pointer w-3.2 h-3.2"
+                          />
+                          <span>{m}月</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Data Table */}
+              <div className="overflow-x-auto border border-slate-100 rounded-xl shadow-2xs bg-white">
+                <table className="w-full text-left text-xs min-w-[1200px]">
+                  <thead className="bg-gradient-to-r from-slate-50 to-slate-100 text-[10px] text-slate-500 font-extrabold uppercase border-b border-slate-150">
+                    <tr>
+                      <th className="p-3 w-[240px] sticky left-0 bg-slate-50 z-10 border-r border-slate-150 shadow-3xs">商品及资料</th>
+                      <th className="p-3 w-[160px] text-center border-r border-slate-150">货号编码 / 首选供应商</th>
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => {
+                        const isSelected = selectedMonths.includes(m);
+                        return (
+                          <th 
+                            key={m} 
+                            className={`p-3 text-center transition-all ${
+                              isSelected ? 'bg-blue-50/50 text-blue-900 border-b-2 border-b-blue-500 font-black' : 'text-slate-350 bg-slate-50/10'
+                            }`}
+                          >
+                            {m}月销数
+                          </th>
+                        );
+                      })}
+                      <th className="p-3 text-center bg-blue-600 text-white font-black text-xs">累计总数量</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-150 text-slate-705">
+                    {(() => {
+                      const filteredProductsForSales = allProducts.filter(p => {
+                        if (!salesSearchQuery) return true;
+                        const q = salesSearchQuery.toLowerCase();
+                        return p.productName.toLowerCase().includes(q) || p.productCode.toLowerCase().includes(q);
+                      });
+
+                      if (filteredProductsForSales.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={15} className="p-12 text-center text-slate-400 font-medium">
+                              🔍 没有找到任何与过滤匹配的货品销数汇总。
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      // Pre-calculate sales hash table
+                      const recordHash: { [key: string]: number } = {};
+                      for (const r of salesRecords) {
+                        const year = r.month.split('-')[0];
+                        const monthNum = parseInt(r.month.split('-')[1], 10);
+                        
+                        const matchYear = selectedYears.includes(year);
+                        const matchBranch = salesBranchFilter === 'all' || r.branchName === salesBranchFilter;
+                        
+                        if (matchYear && matchBranch) {
+                          const hashKey = `${r.productCode}_${monthNum}`;
+                          recordHash[hashKey] = (recordHash[hashKey] || 0) + r.quantity;
+                        }
+                      }
+
+                      // Define column totals
+                      const colsTotal: { [month: number]: number } = {};
+                      for (const m of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+                        colsTotal[m] = 0;
+                      }
+                      let totalGrandSum = 0;
+
+                      const rows = filteredProductsForSales.map(p => {
+                        const monthVals: { [month: number]: number } = {};
+                        let rowSum = 0;
+                        
+                        for (const m of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+                          const cellVal = recordHash[`${p.productCode}_${m}`] || 0;
+                          monthVals[m] = cellVal;
+                          
+                          if (selectedMonths.includes(m)) {
+                            colsTotal[m] += cellVal;
+                            rowSum += cellVal;
+                          }
+                        }
+                        totalGrandSum += rowSum;
+
+                        return {
+                          product: p,
+                          monthVals,
+                          rowSum
+                        };
+                      });
+
+                      return (
+                        <>
+                          {rows.map(({ product, monthVals, rowSum }) => (
+                            <tr key={product.id} className="hover:bg-slate-50/60 transition-colors">
+                              <td className="p-3 font-semibold text-slate-800 sticky left-0 bg-white z-10 border-r border-slate-150 shadow-3xs">
+                                <span className="block text-[11.5px] font-bold text-slate-900 leading-tight">{product.productName}</span>
+                                <span className="text-[9px] font-mono text-slate-400 block mt-0.5">规格: {product.specs || '通用'} ｜ 单位: {product.unit || '件'}</span>
+                              </td>
+                              <td className="p-3 text-center border-r border-slate-150 text-slate-500">
+                                <span className="font-mono text-[10.5px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded block w-fit mx-auto">{product.productCode}</span>
+                                <span className="text-[9px] text-slate-400 block mt-1 truncate max-w-[120px]">{product.defaultSupplier || '首选货源厂商'}</span>
+                              </td>
+                              
+                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => {
+                                const isSelected = selectedMonths.includes(m);
+                                const val = monthVals[m] || 0;
+                                return (
+                                  <td 
+                                    key={m} 
+                                    className={`p-3 text-center font-mono font-medium transition-colors text-xs ${
+                                      isSelected 
+                                        ? val > 0 
+                                          ? 'bg-blue-50/15 text-blue-700 font-bold' 
+                                          : 'bg-blue-50/10 text-slate-300'
+                                        : 'text-slate-300 bg-slate-50/10'
+                                    }`}
+                                  >
+                                    {val > 0 ? `${val}` : '-'}
+                                  </td>
+                                );
+                              })}
+
+                              <td className="p-3 text-center bg-blue-50 text-blue-900 font-extrabold text-xs font-mono">
+                                {rowSum} <span className="text-[9px] font-normal text-blue-500">{product.unit || '件'}</span>
+                              </td>
+                            </tr>
+                          ))}
+
+                          {/* Summary Row */}
+                          <tr className="bg-gradient-to-r from-slate-100 to-slate-200 text-slate-800 font-black border-t border-slate-300">
+                            <td className="p-3 font-extrabold sticky left-0 bg-slate-100 z-10 border-r border-slate-300 shadow-3xs">
+                              🏆 上述货品列总合计
+                            </td>
+                            <td className="p-3 text-center border-r border-slate-300 text-slate-600 text-[10px]">
+                              包含已选过滤件
+                            </td>
+                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => {
+                              const isSelected = selectedMonths.includes(m);
+                              const colSum = colsTotal[m] || 0;
+                              return (
+                                <td 
+                                  key={m} 
+                                  className={`p-3 text-center font-mono text-xs ${
+                                    isSelected 
+                                      ? 'bg-blue-100 text-blue-950 font-black' 
+                                      : 'text-slate-400 bg-slate-100/10'
+                                  }`}
+                                >
+                                  {colSum > 0 ? `${colSum}` : '-'}
+                                </td>
+                              );
+                            })}
+                            <td className="p-3 text-center bg-blue-600 text-white font-semibold text-sm font-mono shadow-inner">
+                              {totalGrandSum}
+                            </td>
+                          </tr>
+                        </>
+                      );
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Auxiliary guidance card */}
+              <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex items-start gap-3">
+                <span className="text-xl">💡</span>
+                <div className="text-xs text-blue-800 space-y-1">
+                  <div className="font-bold">采购员下单对比秘诀：</div>
+                  <p className="leading-relaxed">
+                    在多选年限和月份生成合计后，可以直接将上面列表对应的<strong>"累计总数量"</strong>，作为你合并向厂家批量下达【采购协议单】时的<strong>“基准销售参考值”</strong>。可以大幅减少盲目拍脑袋预订所带来的货流呆滞隐患。
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

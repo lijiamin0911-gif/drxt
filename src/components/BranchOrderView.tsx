@@ -50,7 +50,15 @@ const DEFAULT_HISTORY_COLS = [
   { key: 'supplier', label: '供货商/厂家' },
 ];
 
-export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrders, currentUser }: BranchOrderViewProps) {
+export default function BranchOrderView({ orders: rawOrders, purchaseOrders = [], onAddOrders, currentUser }: BranchOrderViewProps) {
+  // Enforce rigid branch data isolation internally
+  const orders = React.useMemo(() => {
+    if (currentUser.role === 'branch') {
+      return rawOrders.filter(o => o.branchId === currentUser.id || o.branchName === currentUser.branchName);
+    }
+    return rawOrders;
+  }, [rawOrders, currentUser]);
+
   const canSeeSales = currentUser.role === 'admin' || currentUser.role === 'purchasing' || currentUser.branchSalesEnabled;
   const [activeTab, setActiveTab] = useState<'catalog' | 'draft' | 'history' | 'shortages' | 'permanent_cancelled' | 'cancelled_orders'>('catalog');
   
@@ -121,7 +129,7 @@ export default function BranchOrderView({ orders, purchaseOrders = [], onAddOrde
     const loadSalesRefs = async () => {
       const activeMonthStr = new Date().toISOString().slice(0, 7); // e.g. "2026-06"
       const refs: { [code: string]: { avg3Months: number; lastYearSameMonth: number } } = {};
-      const branchFilter = currentUser.role === 'branch' ? currentUser.username : undefined; 
+      const branchFilter = currentUser.role === 'branch' ? (currentUser.branchName || currentUser.username) : undefined; 
 
       for (const p of officialProducts) {
         const res = await DbService.calculateSalesReference(p.productCode, activeMonthStr, branchFilter);
