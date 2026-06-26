@@ -57,7 +57,7 @@ export default function DashboardView({ orders, systemConfig, onConfigChange, cu
       }
     };
     loadLogsAndUsers();
-  }, [orders]);
+  }, []); // Run on mount to avoid massive redundant fetch cycles during order modifications and polling
 
   const handleExportFullBackup = async () => {
     setIsBackingUp(true);
@@ -353,7 +353,7 @@ export default function DashboardView({ orders, systemConfig, onConfigChange, cu
         {/* Stat 1 */}
         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs md:text-sm font-medium">分店提报总数</span>
+            <span className="text-xs md:text-sm font-medium">今日订单</span>
             <div className="p-1.5 bg-slate-50 rounded-lg text-slate-600">
               <ClipboardList className="w-4 h-4" />
             </div>
@@ -367,7 +367,7 @@ export default function DashboardView({ orders, systemConfig, onConfigChange, cu
         {/* Stat 2 */}
         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-amber-600 mb-2">
-            <span className="text-xs md:text-sm font-medium">待前台确认订单</span>
+            <span className="text-xs md:text-sm font-medium">待审核订单</span>
             <div className="p-1.5 bg-amber-50 rounded-lg text-amber-600">
               <Layers className="w-4 h-4" />
             </div>
@@ -381,7 +381,7 @@ export default function DashboardView({ orders, systemConfig, onConfigChange, cu
         {/* Stat 3 */}
         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-blue-600 mb-2">
-            <span className="text-xs md:text-sm font-medium">待采购合并订单</span>
+            <span className="text-xs md:text-sm font-medium">待采购订单</span>
             <div className="p-1.5 bg-blue-50 rounded-lg text-blue-600">
               <ShoppingBag className="w-4 h-4" />
             </div>
@@ -395,7 +395,7 @@ export default function DashboardView({ orders, systemConfig, onConfigChange, cu
         {/* Stat 4 */}
         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-rose-600 mb-2">
-            <span className="text-xs md:text-sm font-medium">当前分店总欠货</span>
+            <span className="text-xs md:text-sm font-medium">欠货提醒</span>
             <div className="p-1.5 bg-rose-50 rounded-lg text-rose-600">
               <AlertTriangle className="w-4 h-4" />
             </div>

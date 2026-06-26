@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -303,6 +303,14 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
   const [historySearch, setHistorySearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [historyDateFilter, setHistoryDateFilter] = useState('');
+
+  // Pagination for order history
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(25);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [historySearch, statusFilter, historyDateFilter]);
 
   // Shortages (Current branch backlog where status is 'purchased' and receivedQty < quantity)
   const myShortages = myOrders.filter(o => {
@@ -892,6 +900,10 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
                    o.orderNo.toLowerCase().includes(historySearch.toLowerCase());
     return sMatch && qMatch;
   });
+
+  const paginatedHistory = useMemo(() => {
+    return filteredHistory.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
+  }, [filteredHistory, historyPage, historyPageSize]);
 
   // History Headers for CSV export
   const exportHeaders = [
@@ -1784,7 +1796,7 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredHistory.map(order => {
+                {paginatedHistory.map(order => {
                   const isLongOverdue = order.status === 'pending_confirm' && 
                     (Date.now() - new Date(order.createdAt).getTime()) > 24 * 60 * 60 * 1000;
                   
@@ -2046,6 +2058,45 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
               </tbody>
             </table>
           </div>
+
+          {/* Pagination controls for history */}
+          {filteredHistory.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-100 text-xs text-slate-500 mt-4">
+              <div className="flex items-center gap-2">
+                <span>每页显示:</span>
+                <select
+                  value={historyPageSize}
+                  onChange={e => {
+                    setHistoryPageSize(Number(e.target.value));
+                    setHistoryPage(1);
+                  }}
+                  className="border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer font-medium"
+                >
+                  {[10, 25, 50, 100].map(size => (
+                    <option key={size} value={size}>{size} 条</option>
+                  ))}
+                </select>
+                <span>当前显示 {Math.min((historyPage - 1) * historyPageSize + 1, filteredHistory.length)} - {Math.min(historyPage * historyPageSize, filteredHistory.length)} 条，共 {filteredHistory.length} 条</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                  disabled={historyPage === 1}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold"
+                >
+                  上一页
+                </button>
+                <span className="font-medium text-slate-700">第 {historyPage} / {Math.ceil(filteredHistory.length / historyPageSize)} 页</span>
+                <button
+                  onClick={() => setHistoryPage(p => Math.min(Math.ceil(filteredHistory.length / historyPageSize), p + 1))}
+                  disabled={historyPage >= Math.ceil(filteredHistory.length / historyPageSize)}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

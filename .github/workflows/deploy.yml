@@ -1,0 +1,59 @@
+name: ERP System CD (Auto Deployment)
+
+on:
+  push:
+    branches:
+      - main
+      - master # Triggers on push to either main or master branch
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Execute deployment commands via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}         # Server IP / Domain
+          username: ${{ secrets.SERVER_USER }}     # Username (e.g. root)
+          key: ${{ secrets.SERVER_SSH_KEY }}       # Private SSH key
+          port: ${{ secrets.SERVER_PORT || '22' }} # SSH port, defaults to 22
+          script: |
+            echo "🔌 Connecting to server and starting deployment..."
+            
+            # 1. Navigate to project folder (replace with your actual path)
+            cd /home/ubuntu/erp-system || cd /var/www/erp-system || cd ~/erp-system || { echo "❌ Project directory not found"; exit 1; }
+            
+            # 2. Pull latest changes from GitHub
+            echo "📥 Fetching latest code from Git..."
+            git fetch --all
+            git reset --hard origin/${{ github.ref_name }}
+            
+            # 3. Setup Node.js environment & Install dependencies
+            echo "📦 Installing npm dependencies..."
+            # Using --omit=dev keeps production image clean if needed, but since we compile with esbuild (devDep), we install normally
+            npm install
+            
+            # 4. Build frontend assets & bundle server.ts to dist/server.cjs
+            echo "🏗️  Building production assets..."
+            npm run build
+            
+            # 5. Restart application with PM2 (without downtime)
+            echo "🚀 Restarting service with PM2..."
+            if pm2 describe erp-system > /dev/null 2>&1; then
+              echo "🔄 PM2 process exists, reloading gracefully..."
+              pm2 reload erp-system
+            else
+              echo "🆕 Starting new PM2 process..."
+              # Starts our production build entrypoint and names the process 'erp-system'
+              pm2 start dist/server.cjs --name "erp-system" --env production
+            fi
+            
+            # 6. Save current PM2 list to survive system reboots
+            pm2 save
+            
+            echo "✅ Deployment finished successfully!"

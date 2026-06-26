@@ -1156,7 +1156,7 @@ export default function ReceptionConfirmView({ orders, onConfirmOrders, currentU
                       if (col.key === 'qtyOwed') {
                         return (
                           <td className="p-3 text-center bg-rose-50/30 text-rose-600 font-mono font-extrabold text-sm" key="qtyOwed">
-                            {"qtyOwed" in item ? (item as any).qtyOwed : item.quantity - (item.receivedQty || 0)} 件
+                            {((item as any).qtyOwed !== undefined) ? (item as any).qtyOwed : (item as any).quantity - ((item as any).receivedQty || 0)} 件
                           </td>
                         );
                       }

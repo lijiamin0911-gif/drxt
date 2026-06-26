@@ -44,21 +44,21 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" />
+      {/* Backdrop with elegant non-pure white background */}
+      <div className="fixed inset-0 bg-gradient-to-br from-slate-100 via-blue-50/40 to-slate-200/80 backdrop-blur-sm" />
 
-      {/* Modal element */}
+      {/* Modal element with rich card shadow */}
       <div 
-        className="relative bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-100"
+        className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl shadow-blue-600/15 overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-100"
         id="login-dialog"
       >
         <div className="p-8">
           {/* Logo Brand Header */}
           <div className="flex flex-col items-center justify-center mb-8 text-center">
-            <div className="w-12 h-12 bg-[#1a5c9e]/10 text-[#1a5c9e] rounded-xl flex items-center justify-center mb-3">
+            <div className="w-12 h-12 bg-blue-50 text-[#2563eb] rounded-xl flex items-center justify-center mb-3 shadow-inner">
               <Shield className="w-6 h-6" />
             </div>
-            <h1 className="text-xl font-bold text-slate-800">销售经营分析看板</h1>
+            <h1 className="text-xl font-bold text-slate-800">分店订单协同管理系统</h1>
             <p className="text-xs text-slate-400 mt-1">系统登录及多级权限控制</p>
           </div>
 
@@ -72,7 +72,7 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="请输入用户名" 
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#1a5c9e] focus:ring-2 focus:ring-[#1a5c9e]/15 transition-all"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all"
               />
             </div>
 
@@ -86,7 +86,7 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="请输入密码" 
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#1a5c9e] focus:ring-2 focus:ring-[#1a5c9e]/15 transition-all pr-10"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all pr-10"
                 />
                 <button
                   type="button"
@@ -107,7 +107,7 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
 
             <button 
               type="submit" 
-              className="w-full py-3 bg-[#1a5c9e] hover:bg-[#154678] text-white font-medium text-sm rounded-xl hover:shadow-lg hover:shadow-[#1a5c9e]/10 transition-all cursor-pointer mt-2"
+              className="w-full py-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-medium text-sm rounded-xl hover:shadow-lg hover:shadow-blue-600/10 transition-all cursor-pointer mt-2"
             >
               登 录
             </button>

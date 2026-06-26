@@ -594,6 +594,77 @@ export default function PurchasingView({
     }
   };
 
+  const handleEditOrder = async (order: Order) => {
+    const newQtyStr = window.prompt(`【调整货量】修改订单 [${order.orderNo}] 的数量。\n当前数量: ${order.quantity}，请输入新数量:`, String(order.quantity));
+    if (newQtyStr === null) return;
+    const newQty = parseInt(newQtyStr, 10);
+    if (isNaN(newQty) || newQty <= 0) {
+      alert('请输入大于 0 的有效整数值！');
+      return;
+    }
+
+    const newSpecs = window.prompt(`【调整规格】修改产品规格。\n当前规格: "${order.specs}"，请输入新规格:`, order.specs || '');
+    if (newSpecs === null) return;
+
+    const newSupplier = window.prompt(`【调整跟单生产厂商】修改厂家归属。\n当前厂商: "${order.supplier}"，请输入新厂商名:`, order.supplier || '');
+    if (newSupplier === null) return;
+
+    try {
+      await DbService.editOrderDetails(order.id, {
+        quantity: newQty,
+        specs: newSpecs.trim(),
+        supplier: newSupplier.trim()
+      }, {
+        id: currentUser.id,
+        name: currentUser.username,
+        role: currentUser.role
+      });
+      alert('修改成功！订货单据内容已实时重构保存。');
+    } catch (err: any) {
+      alert('操作失败: ' + err.message);
+    }
+  };
+
+  const handleDeleteOrderInManage = async (order: Order) => {
+    const shortageQty = order.quantity - (order.receivedQty || 0);
+    const hasShortage = order.status === 'purchased' && shortageQty > 0;
+
+    if (hasShortage && !order.isOwedConfirmedByReception) {
+      const action = window.confirm(
+        `【无法直接删除：仍有欠货】\n该单据目前仍拖欠分店 [ ${shortageQty} ] 件，仍处于在轨在途欠货期。\n\n` +
+        `根据主管会签合规流程，您可以先选择：\n` +
+        `👉 点击 【确定】：一键【生成新补单并结转】，将原单实收数截止，未达数量生成全新独立补单（原单将被无欠放行结案，之后即可以安全作废/删除原单）；\n` +
+        `👉 或者是点击【取消】，通知前台主管在“欠货核对”栏核实确认（前台标记“确认无欠”后，采购方可强制删除本书面单）。\n\n` +
+        `是否确定现在一键拆分结转缺货部分，并完成补位生成流转新采购补单？`
+      );
+      if (action) {
+        try {
+          await DbService.createCarryOverOrder(order.id, {
+            id: currentUser.id,
+            name: currentUser.username,
+            role: currentUser.role
+          });
+          alert('结转分拆补单重拍成功！原账目缺货部分已作截止处理，补位新单已成功生成并重新注入待采购流！原订单已无欠，现在可以安全删除了。');
+        } catch (err: any) {
+          alert('快速结转结案失败: ' + err.message);
+        }
+      }
+    } else {
+      if (window.confirm(`确定要彻底作废并从当前采购履约单中【强制删除】这单货品款式吗？\n单号: [${order.orderNo}] | 货品: [${order.productName}]`)) {
+        try {
+          await DbService.deleteOrderByPurchasing(order.id, {
+            id: currentUser.id,
+            name: currentUser.username,
+            role: currentUser.role
+          });
+          alert('疑问款明细已成功作废并彻底删除！');
+        } catch (err: any) {
+          alert('删除失败: ' + err.message);
+        }
+      }
+    }
+  };
+
   // Submit uniquely to a specific supplier (manufacturer-specific workflow)
   const handleBuildSupplierPO = async (supplierName: string, supplierEntries: Order[]) => {
     const groupSelectedIds = supplierEntries.map(o => o.id).filter(id => selectedOrderIds.includes(id));
@@ -1434,13 +1505,24 @@ export default function PurchasingView({
 
                                           {/* Action */}
                                           <td className="py-2.5 px-3 text-center" onClick={e => e.stopPropagation()}>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleSingleCancelOrder(order.id, order.orderNo, order.productName)}
-                                              className="px-1 bg-rose-50 hover:bg-rose-100 border border-rose-220 text-rose-600 rounded font-bold text-[9px] cursor-pointer"
-                                            >
-                                              撤单
-                                            </button>
+                                            <div className="flex flex-col gap-1 items-center justify-center">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleEditOrder(order)}
+                                                className="px-1.5 py-0.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 font-bold rounded text-[9.5px] cursor-pointer"
+                                                title="更改数量、规格型号、指派供应商"
+                                              >
+                                                🖊️ 更改
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSingleCancelOrder(order.id, order.orderNo, order.productName)}
+                                                className="px-1.5 py-0.5 bg-rose-50 hover:bg-rose-100 border border-rose-220 text-rose-600 rounded font-bold text-[9.5px] cursor-pointer"
+                                                title="把原分店订单作废撤销"
+                                              >
+                                                ❌ 撤单
+                                              </button>
+                                            </div>
                                           </td>
                                         </tr>
                                       );
@@ -1638,6 +1720,7 @@ export default function PurchasingView({
                                 <th className="p-2 font-mono text-center w-20">已收数量</th>
                                 <th className="p-2 font-semibold text-rose-600 font-mono text-center w-20 bg-rose-50/10">当前欠货</th>
                                 <th className="p-2 text-center w-32 font-bold text-blue-700">本次到货登录</th>
+                                <th className="p-2 text-center w-40 font-bold text-amber-800 bg-amber-50/30">🔍 采购单据操作</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -1700,6 +1783,51 @@ export default function PurchasingView({
                                           <span className="text-[10px] text-slate-400">件</span>
                                         </div>
                                       )}
+                                    </td>
+                                    <td className="p-2 text-center" onClick={e => e.stopPropagation()}>
+                                      <div className="flex flex-col gap-1 items-center justify-center">
+                                        <div className="flex gap-1 justify-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleEditOrder(order)}
+                                            className="px-1.5 py-0.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 font-bold rounded text-[9.5px] cursor-pointer"
+                                            title="更改数量、规格型号、指派供应商"
+                                          >
+                                            🖊️ 更改
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteOrderInManage(order)}
+                                            className="px-1.5 py-0.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold rounded text-[9.5px] cursor-pointer"
+                                            title="从当前采购履约单中强制删除、作废这单商品"
+                                          >
+                                            🗑️ 删除
+                                          </button>
+                                        </div>
+                                        {short > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              if (window.confirm(`确认要把此单的缺货量 [${short}件] 进行一键拆分并转结为新补货单吗？此操作将把原单的预购量限制为当前的实收量 [${received}件]（即在原单中不再拖欠），并在采购中创建一条全新的补位采购单，状态置为待采购。`)) {
+                                                try {
+                                                  await DbService.createCarryOverOrder(order.id, {
+                                                    id: currentUser.id,
+                                                    name: currentUser.username,
+                                                    role: currentUser.role
+                                                  });
+                                                  alert('已成功生成补发重拍流水！原单缺货已安全结算不再拖欠，补位新单已送达待合并采购池。');
+                                                } catch (err: any) {
+                                                  alert(err.message || '转单失败');
+                                                }
+                                              }
+                                            }}
+                                            className="px-1.5 py-0.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded text-[8px] cursor-pointer shadow-3xs transition-all"
+                                            title="生成新订单补发并标记原单不再欠货"
+                                          >
+                                            ⚡ 结转新单补发
+                                          </button>
+                                        )}
+                                      </div>
                                     </td>
                                   </tr>
                                 );
