@@ -31,7 +31,17 @@ interface UserManagementViewProps {
 }
 
 export default function UserManagementView({ users, onSaveUser, onDeleteUser, currentUser }: UserManagementViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'suppliers'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'suppliers' | 'database'>('users');
+  
+  // Database maintenance state
+  const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
+  const [isClearing, setIsClearing] = useState(false);
+  const [confirmInput, setConfirmInput] = useState('');
+  
+  // Database selective clear state
+  const [targetBranchName, setTargetBranchName] = useState<string>('');
+  const [targetPurchaserName, setTargetPurchaserName] = useState<string>('');
+  const [targetReceptionistName, setTargetReceptionistName] = useState<string>('');
   
   // Suppliers management state
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -577,6 +587,105 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
     }
   };
 
+  const handleClearData = async () => {
+    if (selectedCollections.length === 0) {
+      alert('请至少勾选一个要清空的数据集！');
+      return;
+    }
+
+    if (confirmInput.trim().toUpperCase() !== 'CONFIRM') {
+      alert('请在输入框内输入 "CONFIRM" 来确认此项毁灭性清空操作。');
+      return;
+    }
+
+    const colLabels = selectedCollections.map(c => {
+      switch (c) {
+        case 'db_orders': return '订货单数据';
+        case 'db_purchase_orders': return '采购分配合同';
+        case 'db_arrivals': return '到货验收记录';
+        case 'db_inventory': return '期初/账面库存明细';
+        case 'db_branch_stocks': return '分店实物库存';
+        case 'db_products': return '商品库主数据';
+        case 'db_suppliers': return '供应商往来单位';
+        case 'db_sales_records': return '分店零售月报';
+        case 'db_independent_purchase_orders': return '缺货自主补货单';
+        case 'db_users': return '协者用户账号';
+        case 'db_logs': return '系统操作日志';
+        default: return c;
+      }
+    });
+
+    const isSelective = !!(targetBranchName || targetPurchaserName || targetReceptionistName);
+    const filterInfo = [
+      targetBranchName ? `分店: ${targetBranchName}` : '',
+      targetPurchaserName ? `采购员: ${targetPurchaserName}` : '',
+      targetReceptionistName ? `前台/验货: ${targetReceptionistName}` : ''
+    ].filter(Boolean).join('、');
+
+    let confirmMsg = `⚠️ 安全警告 ⚠️\n\n您即将清空以下 [${selectedCollections.length}] 个数据集：\n${colLabels.join('、')}\n\n该操作无法撤销，数据将从 Supabase/PostgreSQL 数据库中永久抹除！您确定要继续吗？`;
+    if (isSelective) {
+      confirmMsg = `⚠️ 靶向局部清洗警告 ⚠️\n\n您即将对特定对象进行数据清空：\n【${filterInfo}】\n\n受影响的所选 [${selectedCollections.length}] 个数据集如下：\n${colLabels.join('、')}\n\n该操作仅会抹除/筛选删除属于上述特定对象的记录。确定要执行该局部清洗操作吗？`;
+    }
+
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    setIsClearing(true);
+    try {
+      const operator = {
+        id: currentUser?.id || 'admin',
+        name: currentUser?.username || '管理员',
+        role: currentUser?.role || 'admin'
+      };
+      
+      const filter = isSelective ? {
+        branchName: targetBranchName || undefined,
+        purchaserName: targetPurchaserName || undefined,
+        receptionistName: targetReceptionistName || undefined
+      } : undefined;
+
+      await DbService.clearCollections(selectedCollections, operator, filter);
+      
+      alert(isSelective 
+        ? `🎉 靶向局部清洗成功！已安全清洗属于 ${filterInfo} 的相关数据，其他不匹配的数据被安全保留。`
+        : '🎉 恭喜！所选数据集已成功从 PostgreSQL/Supabase 数据库中安全抹去，数据已置空。'
+      );
+      setSelectedCollections([]);
+      setConfirmInput('');
+      setTargetBranchName('');
+      setTargetPurchaserName('');
+      setTargetReceptionistName('');
+      
+      if (selectedCollections.includes('db_users')) {
+        alert('💡 提示：协同账号已重置，管理员（admin）及您的当前登录账号已自动保留，其余协作账号已被清除。');
+      }
+      
+      window.location.reload();
+    } catch (err: any) {
+      console.error(err);
+      alert(`❌ 清空失败：${err.message || '未知错误'}`);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const selectAllCollections = () => {
+    setSelectedCollections([
+      'db_orders',
+      'db_purchase_orders',
+      'db_arrivals',
+      'db_inventory',
+      'db_branch_stocks',
+      'db_products',
+      'db_suppliers',
+      'db_sales_records',
+      'db_independent_purchase_orders',
+      'db_users',
+      'db_logs'
+    ]);
+  };
+
   return (
     <div className="space-y-6">
       {/* Tab Switcher */}
@@ -604,9 +713,21 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
         >
           🏭 供应商与跟单分配 (各采购员绑定专属厂家/交期)
         </button>
+        {currentUser?.role === 'admin' && (
+          <button
+            onClick={() => setActiveSubTab('database')}
+            className={`px-5 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+              activeSubTab === 'database' 
+                ? 'border-blue-600 text-blue-600 mb-[-2px]' 
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            💾 数据库维护与清空重置
+          </button>
+        )}
       </div>
 
-      {activeSubTab === 'users' ? (
+      {activeSubTab === 'users' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Create / Edit form */}
           <div className={`rounded-xl border shadow-sm p-4 md:p-6 h-fit space-y-4 ${editingUser ? 'bg-amber-50/10 border-amber-200 animate-fadeIn' : 'bg-white border-slate-100'}`}>
@@ -1173,7 +1294,9 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
             </div>
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeSubTab === 'suppliers' && (
         /* SUPPLIER MERCHANDISER ALLOCATION UI */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fadeIn">
           {/* Create / Edit Supplier Form */}
@@ -1454,6 +1577,274 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                 暂未注册任何供应商，请从左侧录入
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'database' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fadeIn">
+          {/* Left panel: clear collections */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white border border-slate-100 rounded-xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center gap-2 text-rose-600">
+                <ShieldAlert className="w-5 h-5 animate-pulse" />
+                <h3 className="font-bold text-slate-800 text-sm md:text-base">毁灭性清空/高级数据维护</h3>
+              </div>
+
+              <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-900 text-xs leading-relaxed space-y-1.5">
+                <div className="font-bold">⚠️ 安全警告与重要规则：</div>
+                <div>1. 勾选需要清空的数据并执行清空，数据将从 <strong>PostgreSQL/Supabase</strong> 中彻底擦除，不可撤销！</div>
+                <div>2. 清空前，建议通过系统各模块页面（如库存明细、分店月报、提单溯源）的<strong>「导出为 Excel / 导出数据」</strong>按钮进行手动备份。</div>
+                <div>3. 为了防止系统锁定，在勾选清空「协作者用户账号」时，<strong>系统会自动保留您当前的管理员账号</strong>，您可以安全地进行测试。</div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={selectAllCollections}
+                  className="px-3 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
+                >
+                  ☑️ 全选
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCollections([])}
+                  className="px-3 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
+                >
+                  ☒ 全不选
+                </button>
+              </div>
+
+              {/* Grid of checkboxes */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                {[
+                  { key: 'db_orders', label: '分店协同订货单 (db_orders)', desc: '包含分店所有的协同申报单、周期性订货及流转状态。' },
+                  { key: 'db_purchase_orders', label: '采购合同与厂家单 (db_purchase_orders)', desc: '采购合并计划、跟单记录及供应商发货进度。' },
+                  { key: 'db_arrivals', label: '到货实物入库验收 (db_arrivals)', desc: '前台接收单验收、入库核对数据。' },
+                  { key: 'db_inventory', label: '期初/实物账面库存 (db_inventory)', desc: '总部的账面商品存货明细、批次及库存警戒线。' },
+                  { key: 'db_branch_stocks', label: '分店及区域门店库存 (db_branch_stocks)', desc: '各个分店实物在店库存。' },
+                  { key: 'db_products', label: '基础商品主数据 (db_products)', desc: '系统的核心商品名录、编号、单价配置。' },
+                  { key: 'db_suppliers', label: '供应商往来名录 (db_suppliers)', desc: '供应商基本信息及跟单采购员分配。' },
+                  { key: 'db_sales_records', label: '历史零售与销售月报 (db_sales_records)', desc: '分店提报的历史零售明细流水。' },
+                  { key: 'db_independent_purchase_orders', label: '缺货自主补货记录 (db_independent_purchase_orders)', desc: '向厂家自主提起的补充采购。' },
+                  { key: 'db_users', label: '协作者账号密码 (db_users)', desc: '清空其他子账户（系统自动保留主管理员）。' },
+                  { key: 'db_logs', label: '系统安全与操作日志 (db_logs)', desc: '所有成员的后台交互与操作追溯记录。' }
+                ].map(col => {
+                  const checked = selectedCollections.includes(col.key);
+                  return (
+                    <div
+                      key={col.key}
+                      onClick={() => {
+                        if (checked) {
+                          setSelectedCollections(selectedCollections.filter(k => k !== col.key));
+                        } else {
+                          setSelectedCollections([...selectedCollections, col.key]);
+                        }
+                      }}
+                      className={`p-3 border rounded-xl cursor-pointer transition-all flex items-start gap-2.5 hover:shadow-sm select-none ${
+                        checked ? 'bg-rose-50/20 border-rose-200 ring-1 ring-rose-200' : 'bg-white border-slate-100 hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {}} // Handle on parent div click
+                        className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 mt-0.5 pointer-events-none cursor-pointer"
+                      />
+                      <div className="space-y-0.5">
+                        <div className={`text-xs font-bold ${checked ? 'text-rose-900' : 'text-slate-800'}`}>
+                          {col.label}
+                        </div>
+                        <div className="text-[10px] text-slate-400 leading-normal font-medium">
+                          {col.desc}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 靶向选择过滤器 */}
+              <div className="p-4 bg-amber-50/45 border border-amber-200/50 rounded-xl space-y-4">
+                <div className="flex items-center gap-1.5 text-amber-800 text-xs font-bold">
+                  <span>🎯 靶向局部数据清洗过滤器 (可选)</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-normal">
+                  如果您只想清除<strong>某个分店、某个采购员或某个前台</strong>的异常/测试数据，请在下方选择对应对象。不选则代表不进行对象限制（全量清空所选表）。
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] text-slate-500 font-bold mb-1">分店筛选 (保留其他店数据)</label>
+                    <select
+                      value={targetBranchName}
+                      onChange={e => setTargetBranchName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="">全部分店 (不限)</option>
+                      {Array.from(new Set(users.filter(u => u.role === 'branch').map(u => u.branchName || u.username))).map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500 font-bold mb-1">采购跟单筛选 (保留其他采购员)</label>
+                    <select
+                      value={targetPurchaserName}
+                      onChange={e => setTargetPurchaserName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="">全部采购跟单 (不限)</option>
+                      {Array.from(new Set(users.filter(u => u.role === 'purchasing').map(u => u.username))).map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500 font-bold mb-1">前台验货员筛选 (保留其他前台)</label>
+                    <select
+                      value={targetReceptionistName}
+                      onChange={e => setTargetReceptionistName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="">全部前台/验货 (不限)</option>
+                      {Array.from(new Set(users.filter(u => u.role === 'receptionist').map(u => u.username))).map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {(targetBranchName || targetPurchaserName || targetReceptionistName) && (
+                  <div className="text-[10px] text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-100 font-bold flex items-center justify-between">
+                    <span>
+                      📌 局部清空模式已激活：仅清除
+                      {[
+                        targetBranchName ? `【分店: ${targetBranchName}】` : '',
+                        targetPurchaserName ? `【采购: ${targetPurchaserName}】` : '',
+                        targetReceptionistName ? `【前台: ${targetReceptionistName}】` : ''
+                      ].filter(Boolean).join(' + ')}
+                      的数据，其余数据会予以保留。
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetBranchName('');
+                        setTargetPurchaserName('');
+                        setTargetReceptionistName('');
+                      }}
+                      className="text-[9px] text-rose-600 hover:underline font-extrabold cursor-pointer"
+                    >
+                      ✕ 撤销筛选
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Execution panel */}
+              <div className="pt-6 border-t border-slate-100 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-extrabold text-rose-700">
+                    💡 请输入 "CONFIRM" 确认执行此毁灭性清空操作：
+                  </label>
+                  <input
+                    type="text"
+                    value={confirmInput}
+                    onChange={e => setConfirmInput(e.target.value)}
+                    placeholder="输入 CONFIRM 以激活清空按钮"
+                    className="w-full max-w-md px-3 py-2 border border-rose-250 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 font-mono font-bold uppercase bg-rose-50/10 placeholder-slate-400"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={isClearing || confirmInput.trim().toUpperCase() !== 'CONFIRM' || selectedCollections.length === 0}
+                    onClick={handleClearData}
+                    className={`px-6 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-sm ${
+                      isClearing || confirmInput.trim().toUpperCase() !== 'CONFIRM' || selectedCollections.length === 0
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed shadow-none'
+                        : 'bg-rose-600 hover:bg-rose-700 text-white border border-rose-700 cursor-pointer'
+                    }`}
+                  >
+                    {isClearing ? '⏳ 正在彻底执行清空抹去...' : `🔥 立即安全清除已选的 [${selectedCollections.length}] 个表数据`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right panel: Import / Export guide */}
+          <div className="space-y-6">
+            <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4 leading-relaxed text-xs">
+              <div className="font-extrabold text-slate-800 flex items-center gap-1.5 pb-2 border-b border-slate-150">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                测试数据 Excel 批量上传入口指南
+              </div>
+              <div className="text-slate-500 space-y-3.5">
+                <p>
+                  当您将数据库清空后，可以通过系统各模块自带的 Excel/CSV 批量导入功能，非常方便地上传您的真实业务数据进行测试：
+                </p>
+
+                <div className="space-y-2">
+                  <div className="font-bold text-slate-700 flex items-center gap-1">
+                    <span className="text-emerald-600">1.</span> 👥 协作者多端子账号
+                  </div>
+                  <div className="pl-4 text-[11px] text-slate-400 leading-normal">
+                    <strong>入口</strong>: 当前标签页 <strong>「成员账号管理与安全」</strong>
+                    <br />
+                    <strong>说明</strong>: 点击右侧「Excel 批量导入成员」展开面板，下载模板并填写即可一键录入。
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="font-bold text-slate-700 flex items-center gap-1">
+                    <span className="text-emerald-600">2.</span> 🏭 供应商与专属跟单
+                  </div>
+                  <div className="pl-4 text-[11px] text-slate-400 leading-normal">
+                    <strong>入口</strong>: 当前标签页 <strong>「供应商与跟单分配」</strong>
+                    <br />
+                    <strong>说明</strong>: 右上角支持直接新增，或通过内置供应商管理进行批量登记。
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="font-bold text-slate-700 flex items-center gap-1">
+                    <span className="text-emerald-600">3.</span> 📦 基础商品库与期初库存
+                  </div>
+                  <div className="pl-4 text-[11px] text-slate-400 leading-normal">
+                    <strong>入口</strong>: <strong>「账面库存监管 (库存实物明细)」</strong> 页面
+                    <br />
+                    <strong>说明</strong>: 点击 <strong>「Excel 批量录入/盘点导入」</strong> 下载对应模板，导入商品基本属性、编码和实物期初账面数。
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="font-bold text-slate-700 flex items-center gap-1">
+                    <span className="text-emerald-600">4.</span> 📊 历史零售明细月报
+                  </div>
+                  <div className="pl-4 text-[11px] text-slate-400 leading-normal">
+                    <strong>入口</strong>: <strong>「分店零售分析 (零售月报模型)」</strong> 页面
+                    <br />
+                    <strong>说明</strong>: 可通过 <strong>「Excel 导入/盘点零售」</strong> 上传包含各分店销量、单价、月份的历史月报数据，瞬间生成大屏看板。
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="font-bold text-slate-700 flex items-center gap-1">
+                    <span className="text-emerald-600">5.</span> 📈 总部历史批发订单
+                  </div>
+                  <div className="pl-4 text-[11px] text-slate-400 leading-normal">
+                    <strong>入口</strong>: <strong>「总部批发决策 (供销供货大屏)」</strong> 页面
+                    <br />
+                    <strong>说明</strong>: 通过 <strong>「Excel 导入批发」</strong> 上传批发交易数据。
+                  </div>
+                </div>
+
+                <div className="p-3 bg-emerald-50 text-emerald-950 rounded-lg text-[11px] leading-relaxed border border-emerald-100">
+                  <strong>💡 贴心提醒：</strong>
+                  所有上传的模板，都已经在导入弹窗中内置了<strong>「标准 Excel 模板下载」</strong>按钮，请下载后再填写以保证格式 100% 匹配。
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

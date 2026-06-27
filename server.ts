@@ -40,8 +40,8 @@ async function startServer() {
     res.json({ status: "ok", lastModified: ServerDbService.getLastModified() });
   });
 
-  // Auto-detect production mode based on environment variable or pre-built assets
-  const isProd = process.env.NODE_ENV === "production" || fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
+  // Auto-detect production mode based on environment variable
+  const isProd = process.env.NODE_ENV === "production";
 
   // Vite middleware for development vs static serve for production
   if (!isProd) {

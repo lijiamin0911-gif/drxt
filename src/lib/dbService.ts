@@ -147,6 +147,10 @@ export class DbService {
     return this.callServer('importUsers', [items, operator, overwrite]);
   }
 
+  public static async clearCollections(collections: string[], operator: any, filter?: { branchName?: string; purchaserName?: string; receptionistName?: string }): Promise<void> {
+    return this.callServer('clearCollections', [collections, operator, filter]);
+  }
+
   public static async getOrders(): Promise<Order[]> {
     return this.getWithCache('getOrders', []);
   }
@@ -329,5 +333,9 @@ export class DbService {
 
   public static async saveIndependentPurchaseOrder(po: IndependentPurchaseOrder, operator: any): Promise<void> {
     return this.callServer('saveIndependentPurchaseOrder', [po, operator]);
+  }
+
+  public static async deletePurchaseOrder(poId: string, deleteBranchOrders: boolean, operator: any): Promise<void> {
+    return this.callServer('deletePurchaseOrder', [poId, deleteBranchOrders, operator]);
   }
 }

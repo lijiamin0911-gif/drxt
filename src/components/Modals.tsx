@@ -113,6 +113,36 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
             </button>
           </form>
 
+          {/* Helper panel for demo accounts */}
+          <div className="mt-6 pt-5 border-t border-slate-100">
+            <div className="rounded-xl bg-slate-50 p-4 text-xs text-slate-500 border border-slate-100">
+              <div className="font-semibold text-slate-700 flex items-center gap-1.5 mb-2">
+                <Users className="w-3.5 h-3.5 text-[#2563eb]" />
+                系统演示与测试账户：
+              </div>
+              <ul className="space-y-1.5 leading-relaxed font-mono">
+                <li>🔑 <span className="font-semibold text-slate-600">系统最高管理员</span>: admin / 密码 <span className="bg-blue-50 text-[#2563eb] px-1 rounded font-bold">123</span> 或 <span className="bg-blue-50 text-[#2563eb] px-1 rounded font-bold">1111</span></li>
+                <li>🔑 <span className="font-semibold text-slate-600">采购员</span>: 采购员 / 密码 <span className="bg-blue-50 text-[#2563eb] px-1 rounded font-bold">1111</span></li>
+                <li>🔑 <span className="font-semibold text-slate-600">前台验收员</span>: 前台验收员 / 密码 <span className="bg-blue-50 text-[#2563eb] px-1 rounded font-bold">1111</span></li>
+                <li>🔑 <span className="font-semibold text-slate-600">黄石店店长</span>: 黄石店店长 / 密码 <span className="bg-blue-50 text-[#2563eb] px-1 rounded font-bold">1111</span></li>
+              </ul>
+              <div className="mt-3 pt-2 border-t border-slate-200/50 flex items-center justify-between gap-2">
+                <span className="text-[10px] text-slate-400">💡 登录遇到障碍？</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('确定要重置所有本地账户及初始测试密码吗？')) {
+                      onResetUsers();
+                    }
+                  }}
+                  className="text-[10px] text-[#2563eb] hover:text-[#1d4ed8] font-semibold underline cursor-pointer"
+                >
+                  一键重置初始账号
+                </button>
+              </div>
+            </div>
+          </div>
+
 
         </div>
       </div>

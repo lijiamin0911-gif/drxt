@@ -464,6 +464,201 @@ export class ServerDbService {
     this.listeners.forEach(cb => cb());
   }
 
+  // Clear specific collections of test data, with optional selective filters
+  public static async clearCollections(
+    collections: string[], 
+    operator: { id: string, name: string, role: string },
+    filter?: { branchName?: string; purchaserName?: string; receptionistName?: string }
+  ): Promise<void> {
+    const isSelective = filter && (filter.branchName || filter.purchaserName || filter.receptionistName);
+    console.log(`🧹 [DB] Clearing collections: [${collections.join(', ')}] by ${operator.name} (${operator.role}). Selective: ${!!isSelective}`, filter);
+    
+    // If selective, we fetch suppliers to check merchandiser mappings
+    const suppliersList = isSelective ? await this.getSuppliers() : [];
+    
+    for (const col of collections) {
+      if (col === 'db_orders') {
+        const orders = await this.getOrders();
+        if (isSelective) {
+          const filtered = orders.filter(o => {
+            if (filter.branchName && o.branchName === filter.branchName) return false;
+            if (filter.purchaserName && o.merchandiserName === filter.purchaserName) return false;
+            if (filter.receptionistName && o.remarkOperatorName === filter.receptionistName) return false;
+            return true;
+          });
+          setLocalData('db_orders', filtered);
+          this.cachedOrders = filtered;
+        } else {
+          setLocalData('db_orders', []);
+          this.cachedOrders = [];
+        }
+      } else if (col === 'db_purchase_orders') {
+        const pos = await this.getPurchaseOrders();
+        if (isSelective) {
+          // If filtering by branch, we must inspect the constituent orders
+          const orders = await this.getOrders();
+          const filteredOrders = orders.filter(o => {
+            if (filter.branchName && o.branchName === filter.branchName) return false;
+            if (filter.purchaserName && o.merchandiserName === filter.purchaserName) return false;
+            if (filter.receptionistName && o.remarkOperatorName === filter.receptionistName) return false;
+            return true;
+          });
+          const remainingOrderIds = new Set(filteredOrders.map(o => o.id));
+
+          const filteredPos = pos.filter(po => {
+            // Filter by purchaser name
+            if (filter.purchaserName) {
+              const matchedSup = suppliersList.find(s => s.name === po.supplier);
+              const merchandisers = matchedSup?.merchandiserName ? matchedSup.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()) : [];
+              if (merchandisers.includes(filter.purchaserName)) return false;
+            }
+            // Filter out empty POs or recalculate totalQuantity
+            po.orderIds = po.orderIds.filter(id => remainingOrderIds.has(id));
+            if (po.orderIds.length === 0) return false; // delete PO completely if no constituent orders remain
+            
+            // Recalculate total quantity
+            const constituentOrders = filteredOrders.filter(o => po.orderIds.includes(o.id));
+            po.totalQuantity = constituentOrders.reduce((sum, o) => sum + o.quantity, 0);
+            return true;
+          });
+          setLocalData('db_purchase_orders', filteredPos);
+          this.cachedPurchaseOrders = filteredPos;
+        } else {
+          setLocalData('db_purchase_orders', []);
+          this.cachedPurchaseOrders = [];
+        }
+      } else if (col === 'db_arrivals') {
+        const arrivals = getLocalData<Arrival[]>('db_arrivals', []);
+        if (isSelective) {
+          const filtered = arrivals.filter(arr => {
+            if (filter.receptionistName && arr.operator === filter.receptionistName) return false;
+            // Also if the PO associated with this arrival is deleted/filtered, we could filter it, but simple operator check is very safe
+            return true;
+          });
+          setLocalData('db_arrivals', filtered);
+        } else {
+          setLocalData('db_arrivals', []);
+        }
+      } else if (col === 'db_logs') {
+        const logs = getLocalData<OperationLog[]>('db_logs', []);
+        if (isSelective) {
+          const filtered = logs.filter(log => {
+            if (filter.branchName && log.username === filter.branchName && log.role === 'branch') return false;
+            if (filter.purchaserName && log.username === filter.purchaserName && log.role === 'purchasing') return false;
+            if (filter.receptionistName && log.username === filter.receptionistName && log.role === 'receptionist') return false;
+            return true;
+          });
+          setLocalData('db_logs', filtered);
+          this.cachedLogs = filtered;
+        } else {
+          setLocalData('db_logs', []);
+          this.cachedLogs = [];
+        }
+      } else if (col === 'db_inventory') {
+        if (!isSelective) {
+          setLocalData('db_inventory', []);
+          this.cachedInventory = [];
+        }
+      } else if (col === 'db_products') {
+        if (!isSelective) {
+          setLocalData('db_products', []);
+          this.cachedProducts = [];
+        }
+      } else if (col === 'db_suppliers') {
+        if (!isSelective) {
+          setLocalData('db_suppliers', []);
+          this.cachedSuppliers = [];
+        }
+      } else if (col === 'db_sales_records') {
+        const records = getLocalData<SalesRecord[]>('db_sales_records', []);
+        if (isSelective) {
+          const filtered = records.filter(r => {
+            if (filter.branchName && r.branchName === filter.branchName) return false;
+            return true;
+          });
+          setLocalData('db_sales_records', filtered);
+          this.cachedSalesRecords = filtered;
+        } else {
+          setLocalData('db_sales_records', []);
+          this.cachedSalesRecords = [];
+        }
+      } else if (col === 'db_branch_stocks') {
+        const stocks = getLocalData<BranchStock[]>('db_branch_stocks', []);
+        if (isSelective) {
+          const filtered = stocks.filter(s => {
+            if (filter.branchName && s.branchName === filter.branchName) return false;
+            return true;
+          });
+          setLocalData('db_branch_stocks', filtered);
+          this.cachedBranchStocks = filtered;
+        } else {
+          setLocalData('db_branch_stocks', []);
+          this.cachedBranchStocks = [];
+        }
+      } else if (col === 'db_independent_purchase_orders') {
+        const pos = getLocalData<IndependentPurchaseOrder[]>('db_independent_purchase_orders', []);
+        if (isSelective) {
+          const filtered = pos.filter(po => {
+            // Note independent POs do not have a dedicated creator field in interface but are created by purchaser.
+            // If filtering by purchaserName, we check if supplier belongs to that purchaser
+            if (filter.purchaserName) {
+              const matchedSup = suppliersList.find(s => s.name === po.items[0]?.supplier);
+              const merchandisers = matchedSup?.merchandiserName ? matchedSup.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()) : [];
+              if (merchandisers.includes(filter.purchaserName)) return false;
+            }
+            return true;
+          });
+          setLocalData('db_independent_purchase_orders', filtered);
+          this.cachedIndependentPurchaseOrders = filtered;
+        } else {
+          setLocalData('db_independent_purchase_orders', []);
+          this.cachedIndependentPurchaseOrders = [];
+        }
+      } else if (col === 'db_users') {
+        const currentUsers = getLocalData<User[]>('db_users', []);
+        if (isSelective) {
+          const filtered = currentUsers.filter(u => {
+            if (filter.branchName && u.username === filter.branchName && u.role === 'branch') return false;
+            if (filter.purchaserName && u.username === filter.purchaserName && u.role === 'purchasing') return false;
+            if (filter.receptionistName && u.username === filter.receptionistName && u.role === 'receptionist') return false;
+            return true;
+          });
+          // Preserve administrative users and the active operator so they don't get locked out
+          const preserved = filtered.filter(u => u.id === operator.id || u.username === operator.name || u.role === 'admin');
+          const finalUsers = preserved.length > 0 ? preserved : currentUsers.filter(u => u.role === 'admin');
+          setLocalData('db_users', finalUsers);
+          this.cachedUsers = finalUsers;
+        } else {
+          // Preserve administrative users and the active operator so they don't get locked out
+          const preserved = currentUsers.filter(u => u.id === operator.id || u.username === operator.name || u.role === 'admin');
+          const finalUsers = preserved.length > 0 ? preserved : currentUsers.filter(u => u.role === 'admin');
+          setLocalData('db_users', finalUsers);
+          this.cachedUsers = finalUsers;
+        }
+      }
+    }
+    
+    // Log this major maintenance action
+    let details = `管理员清空了以下数据集：[${collections.join(', ')}]，保留了主要管理账户。`;
+    if (isSelective) {
+      details = `管理员针对特定对象进行了【靶向清空】：` + [
+        filter.branchName ? `分店: ${filter.branchName}` : '',
+        filter.purchaserName ? `采购员: ${filter.purchaserName}` : '',
+        filter.receptionistName ? `前台/验收: ${filter.receptionistName}` : ''
+      ].filter(Boolean).join('，') + `。受影响数据集：[${collections.join(', ')}]。`;
+    }
+    
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      isSelective ? '🧹 靶向清洗特定对象数据' : '🧹 清空/重置测试数据',
+      details
+    );
+    
+    this.triggerChange();
+  }
+
   // Initialize seed database
   public static async initialize() {
     // 1. PostgreSQL / Supabase Integration
@@ -477,43 +672,7 @@ export class ServerDbService {
           dbData = { ...dbData, ...pgData };
           console.log('✅ [DB] Successfully loaded all collections from PostgreSQL/Supabase into memory.');
         } else {
-          console.log('ℹ️ [DB] PostgreSQL/Supabase DB is empty. Seeding and migrating from memory/file...');
-          
-          // Populate cache from file/seed if not already populated
-          if (!dbData.db_users || dbData.db_users.length === 0) {
-            dbData.db_users = SEED_USERS;
-          }
-          if (!dbData.db_config) {
-            dbData.db_config = {
-              id: 'global',
-              shortageThreshold: 10,
-              updatedAt: new Date().toISOString(),
-              updatedBy: '系统'
-            };
-          }
-          if (!dbData.db_inventory || dbData.db_inventory.length === 0) {
-            dbData.db_inventory = SEED_INVENTORY;
-          }
-          if (!dbData.db_products || dbData.db_products.length === 0) {
-            dbData.db_products = SEED_PRODUCTS;
-          }
-          if (!dbData.db_suppliers || dbData.db_suppliers.length === 0) {
-            dbData.db_suppliers = SEED_SUPPLIERS;
-          }
-
-          const keys = [
-            'db_users', 'db_orders', 'db_purchase_orders', 'db_logs', 'db_config',
-            'db_inventory', 'db_products', 'db_suppliers', 'db_sales_records',
-            'db_branch_stocks', 'db_independent_purchase_orders'
-          ];
-          
-          for (const key of keys) {
-            const val = (dbData as any)[key];
-            if (val !== undefined) {
-              await dbClient.set(key, val);
-            }
-          }
-          console.log('✅ [DB] Seed data successfully written to PostgreSQL/Supabase database.');
+          console.log('ℹ️ [DB] PostgreSQL/Supabase DB is empty. No auto-seeding or overwriting of user account data is performed on startup as requested.');
         }
         this.triggerChange();
         return; // Skip standard filesystem / Firebase initialization
@@ -1029,12 +1188,19 @@ export class ServerDbService {
   public static async batchConfirmOrders(orderIds: string[], operator: { id: string; name: string; role: string }): Promise<void> {
     const allOrders = await this.getOrders();
     const confirmedCount = orderIds.length;
+    let autoLinkedCount = 0;
 
     for (const orderId of orderIds) {
       const order = allOrders.find(o => o.id === orderId);
       if (order && order.status === 'pending_confirm') {
         order.status = 'pending_purchase';
         order.confirmedAt = new Date().toISOString();
+        
+        // Auto link if an active PO exists for the same supplier
+        const linked = await this.autoLinkOrderToExistingPo(order, operator);
+        if (linked) {
+          autoLinkedCount++;
+        }
         await this.saveOrder(order, operator);
       }
     }
@@ -1044,7 +1210,7 @@ export class ServerDbService {
       operator.name, 
       operator.role, 
       '确认订单', 
-      `前台批量确认了 ${confirmedCount} 笔分店订单，状态更新：【待采购处理】`
+      `前台批量确认了 ${confirmedCount} 笔分店订单。状态更新：【待采购处理】(其中 ${autoLinkedCount} 笔已自动并案到该合作商的在途采购合同中)`
     );
   }
 
@@ -1137,6 +1303,95 @@ export class ServerDbService {
       `采购员合并生成了 ${posCreated.length} 份采购单：${posCreated.join('; ')}，备注：${poRemarks || '无'}`
     );
     this.triggerChange();
+  }
+
+  // Delete/Cancel a Purchase Order (PO) with the choice to preserve or cancel branch orders
+  public static async deletePurchaseOrder(
+    poId: string, 
+    deleteBranchOrders: boolean, 
+    operator: { id: string; name: string; role: string }
+  ): Promise<void> {
+    const pos = await this.getPurchaseOrders();
+    const poIndex = pos.findIndex(p => p.id === poId);
+    if (poIndex === -1) {
+      throw new Error('采购合同单未找到');
+    }
+    const po = pos[poIndex];
+    const allOrders = await this.getOrders();
+    const poOrders = allOrders.filter(o => po.orderIds.includes(o.id));
+
+    let processedCount = 0;
+    for (const order of poOrders) {
+      if (deleteBranchOrders) {
+        order.status = 'cancelled';
+        order.cancelReason = `因采购合同[${po.poNo}]被废除，关联订单一并作废。`;
+        order.cancelledBy = operator.name;
+        order.cancelledAt = new Date().toISOString();
+      } else {
+        // Preserve and release back to pending purchase queue
+        order.status = 'pending_purchase';
+        order.purchaseOrderId = undefined;
+        order.receivedQty = 0;
+      }
+      await this.saveOrder(order, operator);
+      processedCount++;
+    }
+
+    // Remove PO from cache and database
+    pos.splice(poIndex, 1);
+    if (isFirebaseConfigured && db) {
+      try {
+        await deleteDoc(doc(db, 'purchase_orders', poId));
+      } catch (e) {
+        handleFirestoreError(e, OperationType.DELETE, `purchase_orders/${poId}`);
+      }
+    } else {
+      setLocalData('db_purchase_orders', pos);
+    }
+
+    const actionText = deleteBranchOrders ? '同步作废关联分店订单' : '释放关联订单回采购队列(保留分店订单)';
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '废除采购合同',
+      `采购员作废了合同 [${po.poNo}]，操作选择：【${actionText}】，涉及分店订单：${processedCount} 笔`
+    );
+
+    this.triggerChange();
+  }
+
+  // Automatically link a pending_purchase order to an active PO of the same supplier if available
+  public static async autoLinkOrderToExistingPo(
+    order: Order, 
+    operator: { id: string; name: string; role: string }
+  ): Promise<boolean> {
+    const pos = await this.getPurchaseOrders();
+    // Find active PO (pending_arrival) for the exact same supplier
+    const activePo = pos.find(p => p.supplier.trim() === order.supplier.trim() && p.status === 'pending_arrival');
+    
+    if (activePo) {
+      order.status = 'purchased';
+      order.purchaseOrderId = activePo.id;
+      
+      if (!activePo.orderIds.includes(order.id)) {
+        activePo.orderIds.push(order.id);
+        activePo.totalQuantity += order.quantity;
+        
+        // Save the updated PO
+        if (isFirebaseConfigured && db) {
+          try {
+            await setDoc(doc(db, 'purchase_orders', activePo.id), activePo);
+          } catch (e) {
+            handleFirestoreError(e, OperationType.UPDATE, `purchase_orders/${activePo.id}`);
+          }
+        } else {
+          setLocalData('db_purchase_orders', pos);
+        }
+      }
+      return true;
+    }
+    return false;
   }
 
   // Create direct inventory/replenishment purchase order without branch submission

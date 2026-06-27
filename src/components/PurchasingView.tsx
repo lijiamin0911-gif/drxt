@@ -45,8 +45,13 @@ export default function PurchasingView({
   onLogArrival,
   currentUser 
 }: PurchasingViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'generate' | 'manage' | 'direct' | 'cancelled' | 'sales_history'>('generate');
+  const [activeSubTab, setActiveSubTab] = useState<'generate' | 'manage' | 'direct' | 'cancelled' | 'sales_history' | 'my_products'>('generate');
   const [showPrices, setShowPrices] = useState(false);
+  
+  // Cancel PO choice state
+  const [poToCancel, setPoToCancel] = useState<PurchaseOrder | null>(null);
+  const [deleteAssociatedBranchOrders, setDeleteAssociatedBranchOrders] = useState<boolean>(false);
+  const [isCancellingPo, setIsCancellingPo] = useState<boolean>(false);
   
   // States for sales reference/history with multi-select of year & month
   const [salesRecords, setSalesRecords] = useState<SalesRecord[]>([]);
@@ -743,6 +748,27 @@ export default function PurchasingView({
     }
   };
 
+  // Cancel/Discard Purchase Order handler
+  const handleExecuteCancelPo = async () => {
+    if (!poToCancel) return;
+    setIsCancellingPo(true);
+    try {
+      const operator = {
+        id: currentUser?.id || 'purchasing',
+        name: currentUser?.username || '采购员',
+        role: currentUser?.role || 'purchasing'
+      };
+      await DbService.deletePurchaseOrder(poToCancel.id, deleteAssociatedBranchOrders, operator);
+      alert(`🎉 成功废除采购合同！已${deleteAssociatedBranchOrders ? '同步作废关联的分店订单' : '将关联分店订单重置释放回待采购合并池'}。`);
+      setPoToCancel(null);
+      window.location.reload();
+    } catch (err: any) {
+      alert(`❌ 作废失败: ${err.message || '未知错误'}`);
+    } finally {
+      setIsCancellingPo(false);
+    }
+  };
+
   // Submit to Factory action
   const handleSendToFactory = async (po: PurchaseOrder) => {
     const expectedArrival = factoryArrivalDates[po.id] || po.expectedArrivalDate || new Date(Date.now() + 5*24*60*60*1000).toISOString().slice(0, 10);
@@ -932,6 +958,26 @@ export default function PurchasingView({
         >
           <Trash2 className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
           <span>已作废订单全档 ({orders.filter(o => o.status === 'cancelled').length}件)</span>
+        </button>
+
+        {/* 采购管理专属供应商产品删减模块 */}
+        <button
+          onClick={() => setActiveSubTab('my_products')}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+            activeSubTab === 'my_products' 
+              ? 'bg-white text-emerald-800 shadow-sm font-bold border border-emerald-200' 
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+          title="管理您对接/分配的供应商产品目录，支持产品删减及永久下架"
+        >
+          <span>📦 我对接的供应商货品 ({allProducts.filter(p => {
+            const mySups = suppliers.filter(s => {
+              if (currentUser.role === 'admin') return true;
+              const merchandisers = s.merchandiserName ? s.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()) : [];
+              return merchandisers.includes(currentUser.username);
+            });
+            return mySups.some(s => s.name === p.defaultSupplier);
+          }).length}件)</span>
         </button>
       </div>
 
@@ -1683,6 +1729,19 @@ export default function PurchasingView({
                           </span>
                         )}
 
+                        {/* 废除合同按钮 */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPoToCancel(po);
+                            setDeleteAssociatedBranchOrders(false); // default to release back
+                          }}
+                          className="p-1 text-rose-600 bg-rose-50 border border-rose-150 hover:bg-rose-100 rounded-lg cursor-pointer transition-colors"
+                          title="废除/作废此供应商采购合同"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 animate-pulse" />
+                        </button>
+
                         {/* Dropdown toggle */}
                         <button 
                           onClick={() => setExpandedPoId(isExpanded ? null : po.id)}
@@ -1696,6 +1755,81 @@ export default function PurchasingView({
                     {/* EXPANDED AREA FOR RECEIVING ARRIVALS */}
                     {isExpanded && (
                       <div className="border-t border-slate-100 bg-slate-50/30 p-4 space-y-4 animate-fadeIn">
+                        {/* 货品规格自动合并统计 */}
+                        <div className="bg-emerald-50/20 border border-emerald-100 rounded-xl p-4 space-y-3 text-left">
+                          <div className="flex items-center gap-1.5 text-emerald-800 font-black">
+                            <span>📊 该合同货品品类 & 规格合并汇总统计 (系统实时运算)</span>
+                          </div>
+                          <div className="overflow-x-auto border border-emerald-100/50 rounded-lg bg-white shadow-3xs">
+                            <table className="w-full text-left font-sans text-xs">
+                              <thead className="bg-emerald-50/30 text-emerald-950 border-b border-emerald-100 font-bold uppercase text-[10px]">
+                                <tr>
+                                  <th className="p-2 w-1/3">货品资料与名称</th>
+                                  <th className="p-2">商品编码 (货号)</th>
+                                  <th className="p-2">规格型号 (Specs)</th>
+                                  <th className="p-2 text-center w-28">合并总预购量</th>
+                                  <th className="p-2 text-center w-28">合并已收数量</th>
+                                  <th className="p-2 text-center w-28 text-rose-700">合并拖欠总量</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-emerald-50/50 text-slate-700">
+                                {(() => {
+                                  // Group constituentOrders by productCode + specs
+                                  const groups: { [key: string]: { 
+                                    productName: string;
+                                    productCode: string;
+                                    specs: string;
+                                    quantity: number;
+                                    receivedQty: number;
+                                  } } = {};
+
+                                  for (const order of constituentOrders) {
+                                    const key = `${order.productCode}_${order.specs}`;
+                                    if (!groups[key]) {
+                                      groups[key] = {
+                                        productName: order.productName,
+                                        productCode: order.productCode,
+                                        specs: order.specs,
+                                        quantity: 0,
+                                        receivedQty: 0
+                                      };
+                                    }
+                                    groups[key].quantity += order.quantity;
+                                    groups[key].receivedQty += (order.receivedQty || 0);
+                                  }
+
+                                  const groupList = Object.values(groups);
+                                  if (groupList.length === 0) {
+                                    return (
+                                      <tr>
+                                        <td colSpan={6} className="p-4 text-center text-slate-450">
+                                          暂无关联的产品预订数据
+                                        </td>
+                                      </tr>
+                                    );
+                                  }
+
+                                  return groupList.map(g => {
+                                    const short = g.quantity - g.receivedQty;
+                                    return (
+                                      <tr key={`${g.productCode}_${g.specs}`} className="hover:bg-emerald-50/10">
+                                        <td className="p-2 font-bold text-slate-800">{g.productName}</td>
+                                        <td className="p-2 font-mono font-bold text-slate-600">{g.productCode}</td>
+                                        <td className="p-2 font-semibold text-slate-750">{g.specs}</td>
+                                        <td className="p-2 text-center font-bold font-mono text-slate-800">{g.quantity} 件</td>
+                                        <td className="p-2 text-center font-mono text-slate-500">{g.receivedQty} 件</td>
+                                        <td className={`p-2 text-center font-bold font-mono ${short > 0 ? 'text-rose-650 font-black' : 'text-green-600 font-black bg-green-50/30'}`}>
+                                          {short <= 0 ? '✓ 已收齐' : `${short} 件`}
+                                        </td>
+                                      </tr>
+                                    );
+                                  });
+                                })()}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
                         <div className="flex items-center gap-1 text-blue-700 font-bold">
                           <PackageCheck className="w-4 h-4" />
                           <span>一单式实物扫码到货登记</span>
@@ -2571,6 +2705,99 @@ export default function PurchasingView({
         </div>
       )}
 
+      {activeSubTab === 'my_products' && (
+        <div className="bg-white p-5 border border-slate-100 rounded-xl space-y-6 text-left shadow-sm animate-fadeIn">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm md:text-base flex items-center gap-2">
+                <span className="p-1 bg-emerald-50 text-emerald-600 rounded">📦</span>
+                我负责/对接的供应商货品主数据管理目录
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                在此处，采购员可查看和管理您对接的供应商的产品。支持将呆滞、停产或测试商品从货品主库中直接【删减下架】，保持产品目录的精准干净。
+              </p>
+            </div>
+          </div>
+
+          {/* Table list */}
+          <div className="overflow-x-auto border border-slate-100 rounded-xl bg-white shadow-2xs">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-[10px] text-slate-500 font-extrabold uppercase border-b border-slate-150">
+                <tr>
+                  <th className="p-3">商品资料与名称</th>
+                  <th className="p-3">编码 (商品货号)</th>
+                  <th className="p-3">规格型号</th>
+                  <th className="p-3">计量单位</th>
+                  <th className="p-3">默认/负责供应商</th>
+                  <th className="p-3">录入日期</th>
+                  <th className="p-3 text-center">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {(() => {
+                  const mySups = suppliers.filter(s => {
+                    if (currentUser.role === 'admin') return true;
+                    const merchandisers = s.merchandiserName ? s.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()) : [];
+                    return merchandisers.includes(currentUser.username);
+                  });
+                  const myProds = allProducts.filter(p => mySups.some(s => s.name === p.defaultSupplier));
+
+                  if (myProds.length === 0) {
+                    return (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">
+                          ☕ 暂未分配您负责的供应商产品，或所有关联商品均已被删减干净。
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return myProds.map(prod => (
+                    <tr key={prod.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-3 font-bold text-slate-800">{prod.productName}</td>
+                      <td className="p-3 font-mono font-bold text-slate-650">{prod.productCode}</td>
+                      <td className="p-3 text-slate-650 font-medium">{prod.specs}</td>
+                      <td className="p-3 text-slate-500 font-medium">{prod.unit || '件'}</td>
+                      <td className="p-3">
+                        <span className="inline-block px-2.5 py-1 text-[10px] font-bold bg-blue-50/70 text-blue-700 border border-blue-100 rounded-md">
+                          🏢 {prod.defaultSupplier}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-slate-400">
+                        {prod.createdAt ? new Date(prod.createdAt).toLocaleDateString() : '早期数据'}
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`⚠️ 安全警告 ⚠️\n\n您确定要删减该供应商产品吗？\n商品：${prod.productName} (${prod.productCode})\n供应商：${prod.defaultSupplier}\n\n确认后，该货品将彻底从商品库主数据中下架删除！`)) {
+                              DbService.deleteProduct(prod.id, prod.productName, {
+                                id: currentUser.id,
+                                name: currentUser.username,
+                                role: currentUser.role
+                              }).then(() => {
+                                alert('🎉 商品删减成功！已同步下架。');
+                                setAllProducts(allProducts.filter(p => p.id !== prod.id));
+                              }).catch(err => {
+                                alert(`❌ 删减失败：${err.message}`);
+                              });
+                            }
+                          }}
+                          className="px-2.5 py-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 hover:text-rose-800 text-[10.5px] font-bold rounded-lg cursor-pointer transition-colors"
+                        >
+                          🗑️ 删减并永久下架
+                        </button>
+                      </td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Editing remark modal */}
       {editingRemarkOrder && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4" style={{ margin:0 }}>
@@ -2625,6 +2852,105 @@ export default function PurchasingView({
                 className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl cursor-pointer font-bold duration-150 shadow-xs"
               >
                 💾 确认保存并流转
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 废除采购单/合同的选择模态框 */}
+      {poToCancel && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4" style={{ margin:0 }}>
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-4 border border-rose-100 animate-scaleIn">
+            <div className="flex items-center justify-between border-b border-rose-100 pb-3">
+              <h3 className="font-bold text-rose-700 text-sm md:text-base flex items-center gap-1.5">
+                🗑️ 废除采购合同/订单单据确认
+              </h3>
+              <button 
+                onClick={() => setPoToCancel(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-full cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-600 space-y-3.5 text-left">
+              <div className="bg-rose-50/50 p-3.5 rounded-xl border border-rose-100 text-[11px] space-y-1">
+                <div className="font-bold text-rose-900">合同单号：{poToCancel.poNo}</div>
+                <div className="text-slate-700">合作供货商：<span className="font-bold text-slate-900">{poToCancel.supplier}</span></div>
+                <div className="text-slate-500">创建日期：{poToCancel.orderDate} | 项数: {poToCancel.orderIds.length}款产品</div>
+              </div>
+
+              <div className="space-y-2.5">
+                <label className="text-[11.5px] font-black text-slate-700 block">
+                  🎯 请选择对该合同内【关联的分店原始订单】的处理方式：
+                </label>
+
+                <div className="space-y-2">
+                  <div 
+                    onClick={() => setDeleteAssociatedBranchOrders(false)}
+                    className={`p-3 border rounded-xl cursor-pointer transition-all flex items-start gap-2.5 hover:shadow-xs select-none ${
+                      !deleteAssociatedBranchOrders ? 'bg-indigo-50/45 border-indigo-200 ring-1 ring-indigo-200' : 'bg-white border-slate-150'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      checked={!deleteAssociatedBranchOrders}
+                      onChange={() => {}}
+                      className="text-indigo-600 focus:ring-indigo-500 mt-0.5 pointer-events-none w-3.5 h-3.5"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-indigo-950">
+                        🔄 方式一：释放原始订单回采购计划池 (保留分店单)
+                      </div>
+                      <div className="text-[10px] text-slate-450 leading-relaxed mt-0.5">
+                        推荐选项。关联的分店订单会被保留，并重置回“待合并采购池”，供您后续重新与其他供应商合并下单，分店数据不会丢失。
+                      </div>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => setDeleteAssociatedBranchOrders(true)}
+                    className={`p-3 border rounded-xl cursor-pointer transition-all flex items-start gap-2.5 hover:shadow-xs select-none ${
+                      deleteAssociatedBranchOrders ? 'bg-rose-50/30 border-rose-200 ring-1 ring-rose-200' : 'bg-white border-slate-150'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      checked={deleteAssociatedBranchOrders}
+                      onChange={() => {}}
+                      className="text-rose-600 focus:ring-rose-500 mt-0.5 pointer-events-none w-3.5 h-3.5"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-rose-950">
+                        🗑️ 方式二：同步作废所有的关联分店订单 (一并清除)
+                      </div>
+                      <div className="text-[10px] text-slate-450 leading-relaxed mt-0.5">
+                        强制选项。该合同下的所有分店预订明细将同步标记为“已作废”（状态变更为已作废），彻底从采购流中撤销。
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setPoToCancel(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-650 rounded-xl cursor-pointer duration-150 font-semibold"
+              >
+                取消返回
+              </button>
+              <button
+                type="button"
+                disabled={isCancellingPo}
+                onClick={handleExecuteCancelPo}
+                className={`px-5 py-2 rounded-xl cursor-pointer font-bold duration-150 shadow-xs flex items-center gap-1.5 text-white ${
+                  isCancellingPo ? 'bg-slate-400 cursor-not-allowed' : 'bg-rose-600 hover:bg-rose-700'
+                }`}
+              >
+                {isCancellingPo ? '⏳ 正在执行废除...' : '⚠️ 废除此采购合同'}
               </button>
             </div>
           </div>
