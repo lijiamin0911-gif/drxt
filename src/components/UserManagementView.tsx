@@ -728,7 +728,20 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       </div>
 
       {activeSubTab === 'users' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="space-y-6 animate-fadeIn">
+          {/* 安全温馨提示栏 */}
+          <div className="bg-emerald-50 border border-emerald-150 rounded-xl p-4 text-xs text-emerald-800 leading-relaxed flex items-start gap-3 shadow-xs">
+            <span className="p-1 bg-emerald-100 rounded text-base">🛡️</span>
+            <div className="space-y-1">
+              <div className="font-bold text-emerald-950 text-sm">正式上线账号安全加固已完成</div>
+              <p className="text-slate-600">
+                为防止真实系统上线后账号密码暴露，<strong>登录页面的“系统演示账号”展示板及一键重置按钮已全部移除</strong>。
+                作为系统最高管理员，您可在此安全查看、重设或新增所有系统子账号。下方表格已明文呈现当前所有的登录PIN码（即登录密码），正式投产时请务必在这里提前调整好各分店和采购员的私密密码，确保系统数据安全。
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Create / Edit form */}
           <div className={`rounded-xl border shadow-sm p-4 md:p-6 h-fit space-y-4 ${editingUser ? 'bg-amber-50/10 border-amber-200 animate-fadeIn' : 'bg-white border-slate-100'}`}>
             {editingUser ? (
@@ -1294,6 +1307,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
             </div>
           </div>
         </div>
+      </div>
       )}
 
       {activeSubTab === 'suppliers' && (
