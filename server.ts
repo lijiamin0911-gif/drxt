@@ -35,6 +35,31 @@ async function startServer() {
     }
   });
 
+  // Database connection status diagnostic endpoint
+  app.get("/api/db/status", (req, res) => {
+    try {
+      const isSupabase = process.env.USE_SUPABASE === 'true';
+      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_KEY);
+      const hasPgEnv = !!(process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD);
+      
+      let activeClient = "本地文件 (db.json)";
+      if (isSupabase && hasSupabaseEnv) {
+        activeClient = "Supabase 线上数据库";
+      } else if (hasPgEnv) {
+        activeClient = "腾讯云 PostgreSQL";
+      }
+
+      res.json({
+        supabaseEnabled: isSupabase,
+        supabaseConfigured: hasSupabaseEnv,
+        pgConfigured: hasPgEnv,
+        activeClient
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Internal Server Error" });
+    }
+  });
+
   // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", lastModified: ServerDbService.getLastModified() });

@@ -16,7 +16,7 @@ import { User } from '../types';
 // ==========================================
 interface LoginModalProps {
   isOpen: boolean;
-  onLogin: (u: string, p: string) => boolean;
+  onLogin: (u: string, p: string) => Promise<boolean> | boolean;
   onResetUsers: () => void;
 }
 
@@ -25,20 +25,31 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password.trim()) {
       setErrorMsg('请输入用户名和密码');
       return;
     }
-    const success = onLogin(username.trim(), password.trim());
-    if (!success) {
-      setErrorMsg('用户名或密码错误');
-    } else {
-      setErrorMsg('');
+    
+    setIsValidating(true);
+    setErrorMsg('');
+    try {
+      const success = await onLogin(username.trim(), password.trim());
+      if (!success) {
+        setErrorMsg('用户名或密码错误');
+      } else {
+        setErrorMsg('');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg('登录发生错误，请稍后重试');
+    } finally {
+      setIsValidating(false);
     }
   };
 
@@ -107,9 +118,21 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
 
             <button 
               type="submit" 
-              className="w-full py-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-medium text-sm rounded-xl hover:shadow-lg hover:shadow-blue-600/10 transition-all cursor-pointer mt-2"
+              disabled={isValidating}
+              className={`w-full py-3 text-white font-medium text-sm rounded-xl transition-all cursor-pointer mt-2 flex items-center justify-center gap-2 ${
+                isValidating 
+                  ? 'bg-slate-400 cursor-not-allowed' 
+                  : 'bg-[#2563eb] hover:bg-[#1d4ed8] hover:shadow-lg hover:shadow-blue-600/10'
+              }`}
             >
-              登 录
+              {isValidating ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  正在安全验证中...
+                </>
+              ) : (
+                '登 录'
+              )}
             </button>
           </form>
 

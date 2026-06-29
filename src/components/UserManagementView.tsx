@@ -62,8 +62,19 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
     });
   };
 
+  const [dbStatus, setDbStatus] = useState<{
+    supabaseEnabled: boolean;
+    supabaseConfigured: boolean;
+    pgConfigured: boolean;
+    activeClient: string;
+  } | null>(null);
+
   useEffect(() => {
     loadSuppliersList();
+    fetch('/api/db/status')
+      .then(res => res.json())
+      .then(data => setDbStatus(data))
+      .catch(err => console.error('Error fetching database status:', err));
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -167,6 +178,20 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       alert('保存失败，请稍后重试');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleResetUserPasswordDirect = async (user: User, newPin: string) => {
+    try {
+      const updatedUser: User = {
+        ...user,
+        pin: newPin.trim(),
+      };
+      await onSaveUser(updatedUser);
+      alert(`🎉 账户 [${user.username}] 的登录密码已成功重置为：${newPin}！此修改已无缝同步至云端。`);
+    } catch (err: any) {
+      console.error(err);
+      alert(`❌ 重置密码失败：${err.message || '未知错误'}`);
     }
   };
 
@@ -741,6 +766,35 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
             </div>
           </div>
 
+          {/* 数据库与云端连接体检中心 */}
+          <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="text-base p-1 bg-blue-50 text-blue-600 rounded">🔌</span>
+              <div>
+                <div className="font-bold text-slate-800 text-sm">云端数据库与环境变量体检中心</div>
+                <div className="text-slate-500 mt-0.5">
+                  自动检测 Vercel 环境变量及 Supabase 服务的健康状况和配置一致性
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`px-2.5 py-1 rounded-full font-bold text-[11px] border ${
+                dbStatus?.supabaseConfigured 
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                  : 'bg-amber-50 text-amber-700 border-amber-100'
+              }`}>
+                Supabase 环境变量: {dbStatus?.supabaseConfigured ? '🟢 已配妥 (已检测到 SUPABASE_URL & KEY)' : '🟡 未配妥 (请检查环境变量配置)'}
+              </span>
+              <span className={`px-2.5 py-1 rounded-full font-bold text-[11px] border ${
+                dbStatus?.activeClient.includes('Supabase')
+                  ? 'bg-blue-50 text-blue-700 border-blue-100'
+                  : 'bg-slate-100 text-slate-600 border-slate-200'
+              }`}>
+                活动引擎: {dbStatus ? dbStatus.activeClient : '正在检测中...'}
+              </span>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Create / Edit form */}
           <div className={`rounded-xl border shadow-sm p-4 md:p-6 h-fit space-y-4 ${editingUser ? 'bg-amber-50/10 border-amber-200 animate-fadeIn' : 'bg-white border-slate-100'}`}>
@@ -1265,6 +1319,23 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                               title="编辑账户信息及密码"
                             >
                               <Edit className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Quick Admin Password Reset Button */}
+                            <button
+                              onClick={() => {
+                                const newPass = prompt(`🔑 您正在安全重置账号 [${user.username}] 的登录密码。\n请输入该成员的新密码 / 安全PIN码:`, user.pin);
+                                if (newPass === null) return;
+                                if (!newPass.trim()) {
+                                  alert('密码/PIN 码不能为空！');
+                                  return;
+                                }
+                                handleResetUserPasswordDirect(user, newPass.trim());
+                              }}
+                              className="p-1.5 rounded-lg border border-blue-150 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors cursor-pointer"
+                              title="管理员一键重置密码 (无需邮件)"
+                            >
+                              <Key className="w-3.5 h-3.5" />
                             </button>
 
                             {/* Enable/Disable Button */}
