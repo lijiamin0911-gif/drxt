@@ -468,11 +468,44 @@ export class ServerDbService {
   public static async clearCollections(
     collections: string[], 
     operator: { id: string, name: string, role: string },
-    filter?: { branchName?: string; purchaserName?: string; receptionistName?: string }
+    filter?: { 
+      branchName?: string; 
+      purchaserName?: string; 
+      receptionistName?: string;
+      startDate?: string;
+      endDate?: string;
+    }
   ): Promise<void> {
-    const isSelective = filter && (filter.branchName || filter.purchaserName || filter.receptionistName);
+    const isSelective = !!(filter && (
+      filter.branchName || 
+      filter.purchaserName || 
+      filter.receptionistName || 
+      filter.startDate || 
+      filter.endDate
+    ));
     console.log(`🧹 [DB] Clearing collections: [${collections.join(', ')}] by ${operator.name} (${operator.role}). Selective: ${!!isSelective}`, filter);
     
+    // Helper to check if a date falls inside the filter range
+    const isDateInRange = (dateStr: string | undefined): boolean => {
+      if (!dateStr) return false;
+      try {
+        const itemDate = new Date(dateStr);
+        if (isNaN(itemDate.getTime())) return false;
+        
+        if (filter?.startDate) {
+          const start = new Date(filter.startDate + 'T00:00:00');
+          if (itemDate < start) return false;
+        }
+        if (filter?.endDate) {
+          const end = new Date(filter.endDate + 'T23:59:59.999');
+          if (itemDate > end) return false;
+        }
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+
     // If selective, we fetch suppliers to check merchandiser mappings
     const suppliersList = isSelective ? await this.getSuppliers() : [];
     
@@ -481,10 +514,26 @@ export class ServerDbService {
         const orders = await this.getOrders();
         if (isSelective) {
           const filtered = orders.filter(o => {
-            if (filter.branchName && o.branchName === filter.branchName) return false;
-            if (filter.purchaserName && o.merchandiserName === filter.purchaserName) return false;
-            if (filter.receptionistName && o.remarkOperatorName === filter.receptionistName) return false;
-            return true;
+            let matchBranch = true;
+            let matchPurchaser = true;
+            let matchReceptionist = true;
+            let matchDate = true;
+
+            if (filter.branchName) {
+              matchBranch = o.branchName === filter.branchName;
+            }
+            if (filter.purchaserName) {
+              matchPurchaser = o.merchandiserName === filter.purchaserName;
+            }
+            if (filter.receptionistName) {
+              matchReceptionist = o.remarkOperatorName === filter.receptionistName;
+            }
+            if (filter.startDate || filter.endDate) {
+              matchDate = isDateInRange(o.createdAt);
+            }
+
+            const shouldDelete = matchBranch && matchPurchaser && matchReceptionist && matchDate;
+            return !shouldDelete;
           });
           setLocalData('db_orders', filtered);
           this.cachedOrders = filtered;
@@ -498,23 +547,48 @@ export class ServerDbService {
           // If filtering by branch, we must inspect the constituent orders
           const orders = await this.getOrders();
           const filteredOrders = orders.filter(o => {
-            if (filter.branchName && o.branchName === filter.branchName) return false;
-            if (filter.purchaserName && o.merchandiserName === filter.purchaserName) return false;
-            if (filter.receptionistName && o.remarkOperatorName === filter.receptionistName) return false;
-            return true;
+            let matchBranch = true;
+            let matchPurchaser = true;
+            let matchReceptionist = true;
+            let matchDate = true;
+
+            if (filter.branchName) {
+              matchBranch = o.branchName === filter.branchName;
+            }
+            if (filter.purchaserName) {
+              matchPurchaser = o.merchandiserName === filter.purchaserName;
+            }
+            if (filter.receptionistName) {
+              matchReceptionist = o.remarkOperatorName === filter.receptionistName;
+            }
+            if (filter.startDate || filter.endDate) {
+              matchDate = isDateInRange(o.createdAt);
+            }
+
+            const shouldDelete = matchBranch && matchPurchaser && matchReceptionist && matchDate;
+            return !shouldDelete;
           });
           const remainingOrderIds = new Set(filteredOrders.map(o => o.id));
 
           const filteredPos = pos.filter(po => {
-            // Filter by purchaser name
+            let matchPurchaser = true;
+            let matchDate = true;
+
             if (filter.purchaserName) {
               const matchedSup = suppliersList.find(s => s.name === po.supplier);
               const merchandisers = matchedSup?.merchandiserName ? matchedSup.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()) : [];
-              if (merchandisers.includes(filter.purchaserName)) return false;
+              matchPurchaser = merchandisers.includes(filter.purchaserName);
             }
-            // Filter out empty POs or recalculate totalQuantity
+            if (filter.startDate || filter.endDate) {
+              matchDate = isDateInRange(po.createdAt) || isDateInRange(po.orderDate);
+            }
+
+            // Also check if its constituent orders have been deleted
             po.orderIds = po.orderIds.filter(id => remainingOrderIds.has(id));
-            if (po.orderIds.length === 0) return false; // delete PO completely if no constituent orders remain
+            const hasNoOrders = po.orderIds.length === 0;
+
+            const shouldDelete = (matchPurchaser && matchDate) || hasNoOrders;
+            if (shouldDelete) return false;
             
             // Recalculate total quantity
             const constituentOrders = filteredOrders.filter(o => po.orderIds.includes(o.id));
@@ -530,10 +604,30 @@ export class ServerDbService {
       } else if (col === 'db_arrivals') {
         const arrivals = getLocalData<Arrival[]>('db_arrivals', []);
         if (isSelective) {
+          const orders = await this.getOrders();
           const filtered = arrivals.filter(arr => {
-            if (filter.receptionistName && arr.operator === filter.receptionistName) return false;
-            // Also if the PO associated with this arrival is deleted/filtered, we could filter it, but simple operator check is very safe
-            return true;
+            let matchBranch = true;
+            let matchPurchaser = true;
+            let matchReceptionist = true;
+            let matchDate = true;
+
+            const assocOrder = orders.find(o => o.id === arr.orderId);
+
+            if (filter.branchName) {
+              matchBranch = assocOrder ? assocOrder.branchName === filter.branchName : false;
+            }
+            if (filter.purchaserName) {
+              matchPurchaser = assocOrder ? assocOrder.merchandiserName === filter.purchaserName : false;
+            }
+            if (filter.receptionistName) {
+              matchReceptionist = arr.operator === filter.receptionistName;
+            }
+            if (filter.startDate || filter.endDate) {
+              matchDate = isDateInRange(arr.arrivalDate);
+            }
+
+            const shouldDelete = matchBranch && matchPurchaser && matchReceptionist && matchDate;
+            return !shouldDelete;
           });
           setLocalData('db_arrivals', filtered);
         } else {
@@ -543,10 +637,26 @@ export class ServerDbService {
         const logs = getLocalData<OperationLog[]>('db_logs', []);
         if (isSelective) {
           const filtered = logs.filter(log => {
-            if (filter.branchName && log.username === filter.branchName && log.role === 'branch') return false;
-            if (filter.purchaserName && log.username === filter.purchaserName && log.role === 'purchasing') return false;
-            if (filter.receptionistName && log.username === filter.receptionistName && log.role === 'receptionist') return false;
-            return true;
+            let matchBranch = true;
+            let matchPurchaser = true;
+            let matchReceptionist = true;
+            let matchDate = true;
+
+            if (filter.branchName) {
+              matchBranch = log.username === filter.branchName && log.role === 'branch';
+            }
+            if (filter.purchaserName) {
+              matchPurchaser = log.username === filter.purchaserName && log.role === 'purchasing';
+            }
+            if (filter.receptionistName) {
+              matchReceptionist = log.username === filter.receptionistName && log.role === 'receptionist';
+            }
+            if (filter.startDate || filter.endDate) {
+              matchDate = isDateInRange(log.timestamp);
+            }
+
+            const shouldDelete = matchBranch && matchPurchaser && matchReceptionist && matchDate;
+            return !shouldDelete;
           });
           setLocalData('db_logs', filtered);
           this.cachedLogs = filtered;
@@ -573,8 +683,26 @@ export class ServerDbService {
         const records = getLocalData<SalesRecord[]>('db_sales_records', []);
         if (isSelective) {
           const filtered = records.filter(r => {
-            if (filter.branchName && r.branchName === filter.branchName) return false;
-            return true;
+            let matchBranch = true;
+            let matchDate = true;
+
+            if (filter.branchName) {
+              matchBranch = r.branchName === filter.branchName;
+            }
+            if (filter.startDate || filter.endDate) {
+              const recMonth = r.month;
+              if (filter.startDate) {
+                const startMonth = filter.startDate.substring(0, 7);
+                if (recMonth < startMonth) matchDate = false;
+              }
+              if (filter.endDate) {
+                const endMonth = filter.endDate.substring(0, 7);
+                if (recMonth > endMonth) matchDate = false;
+              }
+            }
+
+            const shouldDelete = matchBranch && matchDate;
+            return !shouldDelete;
           });
           setLocalData('db_sales_records', filtered);
           this.cachedSalesRecords = filtered;
@@ -586,8 +714,18 @@ export class ServerDbService {
         const stocks = getLocalData<BranchStock[]>('db_branch_stocks', []);
         if (isSelective) {
           const filtered = stocks.filter(s => {
-            if (filter.branchName && s.branchName === filter.branchName) return false;
-            return true;
+            let matchBranch = true;
+            let matchDate = true;
+
+            if (filter.branchName) {
+              matchBranch = s.branchName === filter.branchName;
+            }
+            if (filter.startDate || filter.endDate) {
+              matchDate = isDateInRange(s.updatedAt);
+            }
+
+            const shouldDelete = matchBranch && matchDate;
+            return !shouldDelete;
           });
           setLocalData('db_branch_stocks', filtered);
           this.cachedBranchStocks = filtered;
@@ -599,14 +737,20 @@ export class ServerDbService {
         const pos = getLocalData<IndependentPurchaseOrder[]>('db_independent_purchase_orders', []);
         if (isSelective) {
           const filtered = pos.filter(po => {
-            // Note independent POs do not have a dedicated creator field in interface but are created by purchaser.
-            // If filtering by purchaserName, we check if supplier belongs to that purchaser
+            let matchPurchaser = true;
+            let matchDate = true;
+
             if (filter.purchaserName) {
               const matchedSup = suppliersList.find(s => s.name === po.items[0]?.supplier);
               const merchandisers = matchedSup?.merchandiserName ? matchedSup.merchandiserName.split(/[,，;\s\/]+/).map(n => n.trim()) : [];
-              if (merchandisers.includes(filter.purchaserName)) return false;
+              matchPurchaser = merchandisers.includes(filter.purchaserName);
             }
-            return true;
+            if (filter.startDate || filter.endDate) {
+              matchDate = isDateInRange(po.orderDate) || isDateInRange(po.createdAt);
+            }
+
+            const shouldDelete = matchPurchaser && matchDate;
+            return !shouldDelete;
           });
           setLocalData('db_independent_purchase_orders', filtered);
           this.cachedIndependentPurchaseOrders = filtered;
@@ -644,7 +788,9 @@ export class ServerDbService {
       details = `管理员针对特定对象进行了【靶向清空】：` + [
         filter.branchName ? `分店: ${filter.branchName}` : '',
         filter.purchaserName ? `采购员: ${filter.purchaserName}` : '',
-        filter.receptionistName ? `前台/验收: ${filter.receptionistName}` : ''
+        filter.receptionistName ? `前台/验收: ${filter.receptionistName}` : '',
+        filter.startDate ? `起始日期: ${filter.startDate}` : '',
+        filter.endDate ? `结束日期: ${filter.endDate}` : ''
       ].filter(Boolean).join('，') + `。受影响数据集：[${collections.join(', ')}]。`;
     }
     

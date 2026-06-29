@@ -257,6 +257,39 @@ export default function PurchasingView({
     alert(`文本批量代录匹配完成！已为您自动扩充追加了 ${parsedCount} 款采购货条目。`);
   };
 
+  const downloadDirectImportTemplate = (format: 'xlsx' | 'csv') => {
+    const headers = ['商品编码', '商品名称', '规格型号', '采购数量', '上次价格(可选)', '本次价格(可选)'];
+    const sampleData = [
+      ['PROD-A01', '九牧暗装水龙头', 'SS-901', '10', '15.5', '16.0'],
+      ['PROD-B05', '飞利浦吊灯', 'PL-M50W', '25', '45.0', '46.5']
+    ];
+
+    if (format === 'xlsx') {
+      try {
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleData]);
+        XLSX.utils.book_append_sheet(wb, ws, "批量采购单导入模板");
+        XLSX.writeFile(wb, "智能采购订单导入模板.xlsx");
+      } catch (e: any) {
+        alert("下载 Excel 模板失败：" + e.message);
+      }
+    } else {
+      try {
+        const csvContent = [headers.join(','), ...sampleData.map(row => row.join(','))].join('\n');
+        const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "智能采购订单导入模板.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (e: any) {
+        alert("下载 CSV 模板失败：" + e.message);
+      }
+    }
+  };
+
   const handleFileDirectImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2099,6 +2132,24 @@ export default function PurchasingView({
                       onChange={handleFileDirectImport}
                       className="block w-full text-xs text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
                     />
+                    <div className="flex items-center gap-2 mt-1.5 bg-amber-100/40 p-2 rounded-lg border border-amber-200/30">
+                      <span className="text-[10px] text-slate-400 font-bold">参考：</span>
+                      <button
+                        type="button"
+                        onClick={() => downloadDirectImportTemplate('xlsx')}
+                        className="text-[10px] text-amber-800 hover:text-amber-950 font-bold flex items-center gap-0.5 underline transition-all cursor-pointer"
+                      >
+                        📥 下载 Excel 模板
+                      </button>
+                      <span className="text-[10px] text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => downloadDirectImportTemplate('csv')}
+                        className="text-[10px] text-amber-800 hover:text-amber-950 font-bold flex items-center gap-0.5 underline transition-all cursor-pointer"
+                      >
+                        📥 下载 CSV 模板
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <label className="block text-[11px] font-bold text-slate-600">方案 B：直接复制微信/QQ货品文字批量粘贴</label>

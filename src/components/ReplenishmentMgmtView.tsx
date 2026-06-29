@@ -29,6 +29,7 @@ import {
   User 
 } from '../types';
 import { DbService } from '../lib/dbService';
+import * as XLSX from 'xlsx';
 
 interface ReplenishmentMgmtProps {
   currentUser: User;
@@ -143,26 +144,59 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
       setManualItems([{ productCode: '', productName: '', specs: '', quantity: 50, supplier: '', remark: '', receivedQty: 0 }]);
     }
   }, [activeSubTab]);
-
-  // CSV Template download
   const downloadTemplate = (e: React.MouseEvent) => {
     e.preventDefault();
-    const headers = ['产品编码', '产品名称', '规格型号', '采购数量', '供应商', '备注'];
-    const row = ['CP-1025', '球阀法兰 DN50', 'DN50-PN16 直面', '100', '永嘉阀门制造厂', '日常补库'];
-    const csvContent = "\uFEFF" + [headers.join(','), row.join(',')].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.id = 'download_replenishment_template_btn';
-    link.setAttribute('href', url);
-    link.setAttribute('download', '自主采购补货单批量导入模板.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const data = [
+        ["分店名称", "产品编码", "产品名称", "规格型号", "数量", "供应商", "订单类型", "备注"],
+        ["城东分店", "PROD-A01", "九牧不锈钢暗装高档水龙头", "SS-901-HM", 15, "九牧卫浴制造厂", "常规", "一楼男洗手间损坏更换"],
+        ["城南分店", "PROD-B05", "飞利浦智能LED吸顶灯 50W", "PL-M50W-LED", 25, "飞利浦合肥照明厂", "常规", "二层前厅天花板吊顶替换"],
+        ["总部备货库", "PROD-NEW-99", "高级纳米防爆花洒套件", "NM-HS-99", 8, "广州卫浴五金厂", "特定", "客制化样板展示需求"]
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      
+      ws['!cols'] = [
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 32 },
+        { wch: 24 },
+        { wch: 10 },
+        { wch: 24 },
+        { wch: 12 },
+        { wch: 36 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "批量采购补货导入模板");
+      XLSX.writeFile(wb, "自主采购补货单批量导入模板.xlsx");
+    } catch (err: any) {
+      alert("下载 Excel 模板失败：" + err.message);
+    }
   };
 
-  // CSV Drag and drop file parser
+  const downloadCSVTemplate = (e: React.MouseEvent) => {
+    e.preventDefault();
+    try {
+      const headers = ["分店名称", "产品编码", "产品名称", "规格型号", "数量", "供应商", "订单类型", "备注"];
+      const row1 = ["城东分店", "PROD-A01", "九牧不锈钢暗装高档水龙头", "SS-901-HM", "15", "九牧卫浴制造厂", "常规", "一楼男洗手间损坏更换"];
+      const row2 = ["城南分店", "PROD-B05", "飞利浦智能LED吸顶灯 50W", "PL-M50W-LED", "25", "飞利浦合肥照明厂", "常规", "二层前厅天花板吊顶替换"];
+      
+      const csvContent = "\uFEFF" + [headers.join(','), row1.join(','), row2.join(',')].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', "自主采购补货单批量导入模板.csv");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      alert("下载 CSV 模板失败：" + err.message);
+    }
+  };
+
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -183,6 +217,7 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
     if (e.target.files && e.target.files[0]) {
       parseCSVFile(e.target.files[0]);
     }
@@ -192,51 +227,159 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const text = event.target?.result as string;
-        const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-        if (lines.length < 2) {
-          alert('CSV格式异常：未检测到有效的数据行数！');
+        const bstr = event.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        if (rawJson.length < 1) {
+          alert('Excel/CSV 格式异常：未检测到有效的数据行数！');
           return;
         }
 
         const rawItems: IndependentPurchaseOrderItem[] = [];
-        // Skip header
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
-          if (cols.length < 4) continue; // Must contain at least Code, Name, Specs, Qty
-          
-          const productCode = cols[0];
-          const productName = cols[1];
-          const specs = cols[2];
-          const qty = parseInt(cols[3]) || 0;
-          const supplier = cols[4] || '默认常规厂商';
-          const remark = cols[5] || '';
+        const validationErrors: string[] = [];
+        const codeWarnings: string[] = [];
+        let headerSkipped = false;
+        
+        let codeColIndex = 1;
+        let nameColIndex = 2;
+        let specsColIndex = 3;
+        let qtyColIndex = 4;
+        let supplierColIndex = 5;
+        let remarkColIndex = 7;
 
-          if (!productCode || !productName) continue;
+        // Examine row 0 to find headers dynamically
+        const firstRow = rawJson[0];
+        if (Array.isArray(firstRow)) {
+          const matchedHeaders = firstRow.map(h => String(h || '').trim());
+          const findIndex = (synonyms: string[]) => {
+            return matchedHeaders.findIndex(h => synonyms.some(syn => h.includes(syn)));
+          };
+          
+          const codeIdx = findIndex(['编码', '代码', 'CODE', 'Code', '货号']);
+          if (codeIdx !== -1) codeColIndex = codeIdx;
+          
+          const nameIdx = findIndex(['名称', 'NAME', 'Name', '商品', '产品']);
+          if (nameIdx !== -1) nameColIndex = nameIdx;
+          
+          const specsIdx = findIndex(['规格', '型号', 'SPEC', 'Specs']);
+          if (specsIdx !== -1) specsColIndex = specsIdx;
+          
+          const qtyIdx = findIndex(['数量', '数量', '量', 'QTY', 'Qty']);
+          if (qtyIdx !== -1) qtyColIndex = qtyIdx;
+          
+          const supIdx = findIndex(['供应商', '厂商', '厂家', 'SUPPLIER']);
+          if (supIdx !== -1) supplierColIndex = supIdx;
+          
+          const remIdx = findIndex(['备注', '说明', 'REMARK']);
+          if (remIdx !== -1) remarkColIndex = remIdx;
+        }
+
+        let rowIdx = 0;
+        for (const row of rawJson) {
+          rowIdx++;
+          if (!Array.isArray(row) || row.length === 0) continue;
+          
+          const col0Str = String(row[0] || '').trim();
+          if (
+            !headerSkipped &&
+            (col0Str.includes('产品') ||
+              col0Str.includes('商品') ||
+              col0Str.includes('编码') ||
+              col0Str.includes('CODE') ||
+              col0Str.includes('分店') ||
+              col0Str.includes('名称') ||
+              col0Str.includes('数量'))
+          ) {
+            headerSkipped = true;
+            continue;
+          }
+
+          const productCode = String(row[codeColIndex] || '').trim();
+          const productName = String(row[nameColIndex] || '').trim();
+          const specs = String(row[specsColIndex] || '').trim();
+          const qtyRaw = row[qtyColIndex];
+          const supplier = String(row[supplierColIndex] || '').trim();
+          const remark = String(row[remarkColIndex] || '').trim();
+
+          if (!productCode && !productName) {
+            continue;
+          }
+
+          if (!productCode) {
+            validationErrors.push(`第 ${rowIdx} 行：[产品编码] 属于必填项，当前为空。`);
+            continue;
+          }
+          if (!productName) {
+            validationErrors.push(`第 ${rowIdx} 行：[产品名称] 属于必填项，当前为空。`);
+            continue;
+          }
+
+          const qtyVal = parseInt(String(qtyRaw || ''), 10);
+          if (isNaN(qtyVal) || qtyVal <= 0) {
+            validationErrors.push(`第 ${rowIdx} 行：[数量] [${qtyRaw || '空'}] 格式非法，必须是大于 0 的有效数字。`);
+            continue;
+          }
 
           // Check if system has this product already
           const exists = products.some(p => p.productCode.toLowerCase() === productCode.toLowerCase());
 
+          if (!exists) {
+            codeWarnings.push(`第 ${rowIdx} 行：产品编码 [${productCode}] 在库中不存在，系统将自动录入为“待审核新品”。`);
+          }
+
           rawItems.push({
-            productCode,
+            productCode: productCode.toUpperCase(),
             productName,
             specs,
-            quantity: qty <= 0 ? 50 : qty,
-            supplier,
+            quantity: qtyVal,
+            supplier: supplier || '随单指定厂商',
             remark,
             receivedQty: 0,
             isNew: !exists
           });
         }
 
+        if (validationErrors.length > 0) {
+          alert(`❌ 导入数据格式校验失败，发现以下错误，请修改后重新选择文件：\n\n${validationErrors.slice(0, 10).join('\n')}${validationErrors.length > 10 ? `\n...以及其他 ${validationErrors.length - 10} 个错误` : ''}`);
+          return;
+        }
+
         setParsedItems(rawItems);
-        alert(`CSV文件解析成功！共解析到 ${rawItems.length} 项采购项。`);
+        
+        let successMsg = `🎉 导入成功！共解析到 ${rawItems.length} 项采购项。您可以在下方明细列表中直接进行二次编辑、删除行，确认无误后一键提交至厂家。`;
+        if (codeWarnings.length > 0) {
+          successMsg += `\n\n⚠️ 在库校验提示 (共 ${codeWarnings.length} 个新品)：\n${codeWarnings.slice(0, 3).join('\n')}${codeWarnings.length > 3 ? `\n...以及其他 ${codeWarnings.length - 3} 个新编码` : ''}`;
+        }
+        alert(successMsg);
       } catch (err) {
         console.error(err);
-        alert('解析CSV文件失败，请检查编码格式是否为UTF-8、内容是否标准。');
+        alert('解析 Excel/CSV 文件失败，请检查文件格式是否标准、编码是否为 UTF-8。');
       }
     };
-    reader.readAsText(file, 'utf-8');
+    reader.readAsBinaryString(file);
+  };
+
+  const handleParsedItemChange = (idx: number, field: keyof IndependentPurchaseOrderItem, value: any) => {
+    const updated = [...parsedItems];
+    if (field === 'quantity') {
+      const val = parseInt(String(value), 10);
+      updated[idx].quantity = isNaN(val) ? 0 : val;
+    } else {
+      (updated[idx] as any)[field] = value;
+    }
+    if (field === 'productCode') {
+      const exists = products.some(p => p.productCode.toLowerCase() === String(value).trim().toLowerCase());
+      updated[idx].isNew = !exists;
+    }
+    setParsedItems(updated);
+  };
+
+  const handleDeleteParsedItem = (idx: number) => {
+    const updated = parsedItems.filter((_, i) => i !== idx);
+    setParsedItems(updated);
   };
 
   // Submit manual creation
@@ -1241,95 +1384,106 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
                               placeholder="无"
                               value={item.remark || ''}
                               onChange={e => {
-                                const updated = [...manualItems];
-                                updated[idx].remark = e.target.value;
+                               const updated = [...manualItems];
+                              updated[idx].remark = e.target.value;
+                              setManualItems(updated);
+                            }}
+                            className="w-full text-xs p-1.5 border border-slate-250 bg-white rounded-lg focus:outline-none"
+                          />
+                        </td>
+
+                        <td className="p-2 text-center">
+                          {manualItems.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = manualItems.filter((_, i) => i !== idx);
                                 setManualItems(updated);
                               }}
-                              className="w-full text-xs p-1.5 border border-slate-250 bg-white rounded-lg focus:outline-none"
-                            />
-                          </td>
+                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                          <td className="p-2 text-center">
-                            {manualItems.length > 1 ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = manualItems.filter((_, i) => i !== idx);
-                                  setManualItems(updated);
-                                }}
-                                className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            ) : (
-                              <span className="text-slate-300">-</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            {/* Remarks Box & Action row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-705 flex items-center gap-1">
+                  <span className="w-1.5 h-3 bg-indigo-650 rounded-full"></span>
+                  整单备注及附加指引 (选填)
+                </label>
+                <textarea
+                  rows={2}
+                  value={manualRemarks}
+                  onChange={e => setManualRemarks(e.target.value)}
+                  placeholder="例如：本次为防范大风汛期准备的预备物料，要求物流直接发物流干线..."
+                  className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:ring-1 focus:ring-indigo-500 bg-white text-slate-700 focus:outline-none"
+                />
               </div>
 
-              {/* Remarks Box & Action row */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-705 flex items-center gap-1">
-                    <span className="w-1.5 h-3 bg-indigo-650 rounded-full"></span>
-                    整单备注及附加指引 (选填)
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={manualRemarks}
-                    onChange={e => setManualRemarks(e.target.value)}
-                    placeholder="例如：本次为防范大风汛期准备的预备物料，要求物流直接发物流干线..."
-                    className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:ring-1 focus:ring-indigo-500 bg-white text-slate-700 focus:outline-none"
-                  />
-                </div>
-
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between">
-                  <p className="text-[10px] text-slate-500 leading-relaxed font-semibold">
-                    💡 <span className="text-indigo-700 font-bold">智能建议提示：</span>
-                    您在上方行中键入“产品编码”时，系统将会根据标准货品库进行自动检索联想补全。若该产品在现有的库存商品体系内不存在，系统在生成该采购订单的同时，将会自动在新采购单建立该未登记商品并打上“新品标记”，后续只需等待管理员后台最终对该新品审核入标准商品库即可。
-                  </p>
-                  <div className="flex gap-2.5 pt-3 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('list')}
-                      className="py-2 px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer text-center duration-150"
-                    >
-                      返回列表
-                    </button>
-                    <button
-                      type="submit"
-                      className="py-2 px-8 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-500/15 duration-150 cursor-pointer"
-                    >
-                      确认创建并派发厂家
-                    </button>
-                  </div>
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                <p className="text-[10px] text-slate-500 leading-relaxed font-semibold">
+                  💡 <span className="text-indigo-700 font-bold">智能建议提示：</span>
+                  您在上方行中键入“产品编码”时，系统将会根据标准货品库进行自动检索联想补全。若该产品在现有的库存商品体系内不存在，系统在生成该采购订单的同时，将会自动在新采购单建立该未登记商品并打上“新品标记”，后续只需等待管理员后台最终对该新品审核入标准商品库即可。
+                </p>
+                <div className="flex gap-2.5 pt-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('list')}
+                    className="py-2 px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer text-center duration-150"
+                  >
+                    返回列表
+                  </button>
+                  <button
+                    type="submit"
+                    className="py-2 px-8 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-500/15 duration-150 cursor-pointer"
+                  >
+                    确认创建并派发厂家
+                  </button>
                 </div>
               </div>
-            </form>
-          )}
+            </div>
+          </form>
+        )}
 
           {/* TAB 3: EXCEL IMPORT */}
           {activeSubTab === 'create-import' && (
             <div className="bg-white rounded-3xl border border-slate-150 shadow-sm p-6 md:p-8 space-y-6 text-left">
-              <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="border-b border-slate-100 pb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div className="space-y-0.5">
                   <h3 className="text-sm md:text-base font-black text-slate-800">📥 一键上传表格批量申报采购单</h3>
-                  <p className="text-[11px] text-slate-500 font-semibold">支持直接采用由系统官方标准的CSV数据模板填写完后一键拖拽完成极速派发。</p>
+                  <p className="text-[11px] text-slate-500 font-semibold">支持上传标准微软 Excel 提货表格（.xlsx）及 CSV 电子表格，完美校验编码、自动匹配商品。</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={downloadTemplate}
-                  className="p-2 px-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-150 text-[11px] font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-                  title="下载CSV通用批量补货模板"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>下载采购单标准Excel-CSV模板</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={downloadTemplate}
+                    className="p-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-150 text-[11px] font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
+                    title="下载完全对接系统格式的微软 Excel 导入模板"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>📥 下载 Excel 模板 (.xlsx)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadCSVTemplate}
+                    className="p-2 px-3 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-150 text-[11px] font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
+                    title="下载完全对接系统格式的 CSV 导入模板"
+                  >
+                    <Download className="w-3.5 h-3.5 text-teal-600" />
+                    <span>📥 下载 CSV 模板 (.csv)</span>
+                  </button>
+                </div>
               </div>
 
               {/* Upload Drag area */}
@@ -1348,7 +1502,7 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
                   <input
                     type="file"
                     id="excel_po_file_selector"
-                    accept=".csv"
+                    accept=".xlsx,.xls,.csv"
                     onChange={handleFileChange}
                     className="hidden"
                   />
@@ -1358,10 +1512,10 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
                     </span>
                     <div className="space-y-1">
                       <p className="text-xs font-black text-slate-800">
-                        拖拽您的 CSV 标准格式文件到此处，或点击浏览本地文件
+                        拖拽您的 Excel 或 CSV 标准格式文件到此处，或点击浏览本地文件
                       </p>
                       <p className="text-[10px] text-slate-400 font-semibold">
-                        (推荐直接使用右上方提供的官方标准格式，完美防止编码乱码现象)
+                        (推荐使用上方的官方标准格式，完美防止商品编码不匹配与内容乱码现象)
                       </p>
                     </div>
                   </label>
@@ -1373,7 +1527,7 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full animate-ping"></span>
                       <span className="text-xs font-bold text-slate-700">
-                        预解析结果明细：解析到共 <span className="text-indigo-700 text-sm font-black font-mono">{parsedItems.length}</span> 行采购商品项。
+                        智能导入明细表（您可以直接在表格内修改信息或删除行）：共解析到 <span className="text-indigo-700 text-sm font-black font-mono">{parsedItems.length}</span> 行。
                       </span>
                     </div>
                     <button
@@ -1391,35 +1545,91 @@ export default function ReplenishmentMgmtView({ currentUser }: ReplenishmentMgmt
                       <thead className="bg-slate-150 text-slate-700 font-bold uppercase border-b border-slate-200">
                         <tr>
                           <th className="p-3 text-center w-12">序号</th>
-                          <th className="p-3">产品编码</th>
-                          <th className="p-3">产品名称</th>
+                          <th className="p-3">产品编码 *</th>
+                          <th className="p-3">产品名称 *</th>
                           <th className="p-3">规格型号</th>
-                          <th className="p-3">采购数量</th>
-                          <th className="p-3">供应商</th>
-                          <th className="p-3">备注</th>
-                          <th className="p-3 text-center w-28">产品身份</th>
+                          <th className="p-3 w-28">采购数量 *</th>
+                          <th className="p-3">首选供应商</th>
+                          <th className="p-3">行备注</th>
+                          <th className="p-3 text-center w-28">状态校验</th>
+                          <th className="p-3 text-center w-14">操作</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-150 font-medium">
                         {parsedItems.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/45">
-                            <td className="p-3 text-center font-mono font-bold text-slate-500">{idx + 1}</td>
-                            <td className="p-3 font-mono font-bold text-slate-805 select-all">{item.productCode}</td>
-                            <td className="p-3 font-semibold">{item.productName}</td>
-                            <td className="p-3 text-slate-550">{item.specs || '--'}</td>
-                            <td className="p-3 font-bold font-mono text-slate-700">{item.quantity}</td>
-                            <td className="p-3 text-slate-600 font-semibold">{item.supplier}</td>
-                            <td className="p-3 text-slate-450">{item.remark || '--'}</td>
-                            <td className="p-3 text-center">
+                          <tr key={idx} className="hover:bg-slate-50/45 border-b border-slate-150">
+                            <td className="p-2 text-center font-mono font-bold text-slate-500">{idx + 1}</td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={item.productCode}
+                                onChange={e => handleParsedItemChange(idx, 'productCode', e.target.value)}
+                                className="w-full text-xs p-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 font-mono font-bold uppercase"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={item.productName}
+                                onChange={e => handleParsedItemChange(idx, 'productName', e.target.value)}
+                                className="w-full text-xs p-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 font-semibold"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={item.specs}
+                                onChange={e => handleParsedItemChange(idx, 'specs', e.target.value)}
+                                className="w-full text-xs p-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500"
+                                placeholder="例: DN50"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={e => handleParsedItemChange(idx, 'quantity', e.target.value)}
+                                className="w-24 text-xs p-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 font-mono font-bold text-center"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={item.supplier}
+                                onChange={e => handleParsedItemChange(idx, 'supplier', e.target.value)}
+                                className="w-full text-xs p-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 text-slate-700 font-semibold"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={item.remark || ''}
+                                onChange={e => handleParsedItemChange(idx, 'remark', e.target.value)}
+                                className="w-full text-xs p-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500"
+                                placeholder="选填行说明"
+                              />
+                            </td>
+                            <td className="p-2 text-center">
                               {item.isNew ? (
-                                <span className="text-[10px] font-black px-2 py-0.5 bg-rose-55 text-rose-600 border border-rose-100 rounded-full">
+                                <span className="text-[10px] font-black px-2 py-0.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-full inline-block">
                                   ⚠️ 待审新品
                                 </span>
                               ) : (
-                                <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full">
+                                <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full inline-block">
                                   ✓ 在库产品
                                 </span>
                               )}
+                            </td>
+                            <td className="p-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteParsedItem(idx)}
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="从当前导入列表中移除此行"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 inline-block" />
+                              </button>
                             </td>
                           </tr>
                         ))}

@@ -42,6 +42,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
   const [targetBranchName, setTargetBranchName] = useState<string>('');
   const [targetPurchaserName, setTargetPurchaserName] = useState<string>('');
   const [targetReceptionistName, setTargetReceptionistName] = useState<string>('');
+  const [targetStartDate, setTargetStartDate] = useState<string>('');
+  const [targetEndDate, setTargetEndDate] = useState<string>('');
   
   // Suppliers management state
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -309,7 +311,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
         'receptionist': '前台',
         'purchasing': '采购',
         'boss': '老板/管理者',
-        'region_manager': '区域经理'
+        'region_manager': '区域经理',
+        'data_admin': '数据管理员'
       };
 
       users.forEach(u => {
@@ -368,7 +371,9 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
           'purchasing': 'purchasing',
           '采购': 'purchasing',
           '采购员': 'purchasing',
-          '采购主管': 'purchasing'
+          '采购主管': 'purchasing',
+          'data_admin': 'data_admin',
+          '数据管理员': 'data_admin'
         };
 
         for (const row of rawJson) {
@@ -609,6 +614,14 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
         return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-105">前台汇总</span>;
       case 'purchasing':
         return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-105">采购</span>;
+      case 'data_admin':
+        return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-105">数据管理员</span>;
+      case 'boss':
+        return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-900 text-white border border-slate-700">老板 / 决策者</span>;
+      case 'region_manager':
+        return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-sky-50 text-sky-700 border border-sky-105">区域经理</span>;
+      default:
+        return <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-50 text-slate-700 border border-slate-200">{user.role}</span>;
     }
   };
 
@@ -640,11 +653,12 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       }
     });
 
-    const isSelective = !!(targetBranchName || targetPurchaserName || targetReceptionistName);
+    const isSelective = !!(targetBranchName || targetPurchaserName || targetReceptionistName || targetStartDate || targetEndDate);
     const filterInfo = [
       targetBranchName ? `分店: ${targetBranchName}` : '',
       targetPurchaserName ? `采购员: ${targetPurchaserName}` : '',
-      targetReceptionistName ? `前台/验货: ${targetReceptionistName}` : ''
+      targetReceptionistName ? `前台/验货: ${targetReceptionistName}` : '',
+      (targetStartDate || targetEndDate) ? `时间范围: ${targetStartDate || '不限'} 至 ${targetEndDate || '不限'}` : ''
     ].filter(Boolean).join('、');
 
     let confirmMsg = `⚠️ 安全警告 ⚠️\n\n您即将清空以下 [${selectedCollections.length}] 个数据集：\n${colLabels.join('、')}\n\n该操作无法撤销，数据将从 Supabase/PostgreSQL 数据库中永久抹除！您确定要继续吗？`;
@@ -667,7 +681,9 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       const filter = isSelective ? {
         branchName: targetBranchName || undefined,
         purchaserName: targetPurchaserName || undefined,
-        receptionistName: targetReceptionistName || undefined
+        receptionistName: targetReceptionistName || undefined,
+        startDate: targetStartDate || undefined,
+        endDate: targetEndDate || undefined
       } : undefined;
 
       await DbService.clearCollections(selectedCollections, operator, filter);
@@ -681,6 +697,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       setTargetBranchName('');
       setTargetPurchaserName('');
       setTargetReceptionistName('');
+      setTargetStartDate('');
+      setTargetEndDate('');
       
       if (selectedCollections.includes('db_users')) {
         alert('💡 提示：协同账号已重置，管理员（admin）及您的当前登录账号已自动保留，其余协作账号已被清除。');
@@ -851,6 +869,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                     <option value="branch">分店账号 (只能提交及查看本店订单)</option>
                     <option value="receptionist">前台账号 (核对并一键批量确认订单)</option>
                     <option value="purchasing">采购账号 (合并采购单、厂家发货跟踪)</option>
+                    <option value="data_admin">数据管理员 (价格与财务数据维护，提交/汇总数据给老板)</option>
                     <option value="admin">系统管理员 - 总/副 (最高账号管理、报警线及查看日志)</option>
                   </select>
                 </div>
@@ -979,6 +998,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                         <option value="branch">分店账号 (只能提交及查看本店订单)</option>
                         <option value="receptionist">前台账号 (核对并一键批量确认订单)</option>
                         <option value="purchasing">采购账号 (合并采购单、厂家发货跟踪)</option>
+                        <option value="data_admin">数据管理员 (价格与财务数据维护，提交/汇总数据给老板)</option>
                         <option value="admin">系统管理员 - 总/副 (最高账号管理、报警线及查看日志)</option>
                       </select>
                     </div>
@@ -1220,7 +1240,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                                 <td className="p-2.5 font-semibold text-slate-700">
                                   {item.role === 'admin' ? '⚙️ 管理员' :
                                    item.role === 'branch' ? '🏠 分店' :
-                                   item.role === 'receptionist' ? '💁 前台' : '💼 采购'}
+                                   item.role === 'receptionist' ? '💁 前台' :
+                                   item.role === 'data_admin' ? '🪙 数据管理员' : '💼 采购'}
                                 </td>
                                 <td className="p-2.5 text-slate-550 font-medium text-slate-500">{item.branchName || '—'}</td>
                                 <td className="p-2.5 font-mono font-bold text-indigo-700">{item.pin}</td>
@@ -1755,15 +1776,15 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                   <span>🎯 靶向局部数据清洗过滤器 (可选)</span>
                 </div>
                 <p className="text-[10px] text-slate-500 leading-normal">
-                  如果您只想清除<strong>某个分店、某个采购员或某个前台</strong>的异常/测试数据，请在下方选择对应对象。不选则代表不进行对象限制（全量清空所选表）。
+                  如果您只想清除<strong>某个分店、某个采购员、某个前台</strong>，或<strong>特定时间段内</strong>的异常/测试数据，请在下方选择对应对象或时间。不选则代表不进行对应限制。
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
                   <div>
                     <label className="block text-[10px] text-slate-500 font-bold mb-1">分店筛选 (保留其他店数据)</label>
                     <select
                       value={targetBranchName}
                       onChange={e => setTargetBranchName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer text-slate-700 font-medium"
                     >
                       <option value="">全部分店 (不限)</option>
                       {Array.from(new Set(users.filter(u => u.role === 'branch').map(u => u.branchName || u.username))).map(name => (
@@ -1776,7 +1797,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                     <select
                       value={targetPurchaserName}
                       onChange={e => setTargetPurchaserName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer text-slate-700 font-medium"
                     >
                       <option value="">全部采购跟单 (不限)</option>
                       {Array.from(new Set(users.filter(u => u.role === 'purchasing').map(u => u.username))).map(name => (
@@ -1789,7 +1810,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                     <select
                       value={targetReceptionistName}
                       onChange={e => setTargetReceptionistName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer text-slate-700 font-medium"
                     >
                       <option value="">全部前台/验货 (不限)</option>
                       {Array.from(new Set(users.filter(u => u.role === 'receptionist').map(u => u.username))).map(name => (
@@ -1797,17 +1818,37 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500 font-bold mb-1">起始日期 (可选时间过滤)</label>
+                    <input
+                      type="date"
+                      value={targetStartDate}
+                      onChange={e => setTargetStartDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer text-slate-700 font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500 font-bold mb-1">结束日期 (可选时间过滤)</label>
+                    <input
+                      type="date"
+                      value={targetEndDate}
+                      onChange={e => setTargetEndDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer text-slate-700 font-medium"
+                    />
+                  </div>
                 </div>
-                {(targetBranchName || targetPurchaserName || targetReceptionistName) && (
+                {(targetBranchName || targetPurchaserName || targetReceptionistName || targetStartDate || targetEndDate) && (
                   <div className="text-[10px] text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-100 font-bold flex items-center justify-between">
                     <span>
-                      📌 局部清空模式已激活：仅清除
+                      📌 局部清洗模式已激活：仅清除
                       {[
                         targetBranchName ? `【分店: ${targetBranchName}】` : '',
                         targetPurchaserName ? `【采购: ${targetPurchaserName}】` : '',
-                        targetReceptionistName ? `【前台: ${targetReceptionistName}】` : ''
+                        targetReceptionistName ? `【前台: ${targetReceptionistName}】` : '',
+                        targetStartDate ? `【起始日期: ${targetStartDate}】` : '',
+                        targetEndDate ? `【结束日期: ${targetEndDate}】` : ''
                       ].filter(Boolean).join(' + ')}
-                      的数据，其余数据会予以保留。
+                      的数据，其余不吻合的数据将安全保留。
                     </span>
                     <button
                       type="button"
@@ -1815,6 +1856,8 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                         setTargetBranchName('');
                         setTargetPurchaserName('');
                         setTargetReceptionistName('');
+                        setTargetStartDate('');
+                        setTargetEndDate('');
                       }}
                       className="text-[9px] text-rose-600 hover:underline font-extrabold cursor-pointer"
                     >

@@ -8,10 +8,10 @@ import {
   ShieldCheck, ShieldAlert, LogOut, Users, Key, Landmark, LayoutDashboard,
   CalendarDays, Settings, FolderKanban, RotateCcw, TrendingUp,
   ShoppingBag, ClipboardList, Layers, Truck, Database, Activity, Sparkles, RefreshCw,
-  Award, Briefcase, Home, FileText
+  Award, Briefcase, Home, FileText, Coins
 } from 'lucide-react';
 
-import { User, Transaction, InventoryItem, SummaryDimension, Order, PurchaseOrder, SystemConfig } from './types';
+import { User, Transaction, InventoryItem, SummaryDimension, Order, PurchaseOrder, SystemConfig, Product } from './types';
 import { 
   DEFAULT_USERS, DEFAULT_REGION_STORE_MAP, DEFAULT_TRANSACTIONS, DEFAULT_INVENTORY 
 } from './mockData';
@@ -34,6 +34,7 @@ import PurchasingView from './components/PurchasingView';
 import ReceptionConfirmView from './components/ReceptionConfirmView';
 import ReplenishmentMgmtView from './components/ReplenishmentMgmtView';
 import UserManagementView from './components/UserManagementView';
+import PriceManagementView from './components/PriceManagementView';
 import { DbService } from './lib/dbService';
 
 export default function App() {
@@ -50,12 +51,13 @@ export default function App() {
   const [systemMode, setSystemMode] = useState<'BI' | 'ERP'>('BI');
   const [activeTab, setActiveTab] = useState<
     'overview' | 'monthly' | 'headWholesale' | 'inventory' | 'bossDashboard' |
-    'erpDashboard' | 'erpBranchOrder' | 'erpPurchase' | 'erpReception' | 'erpReplenish' | 'erpUsersSuppliers'
+    'erpDashboard' | 'erpBranchOrder' | 'erpPurchase' | 'erpReception' | 'erpReplenish' | 'erpPriceManagement' | 'erpUsersSuppliers'
   >('overview');
   const [erpOrders, setErpOrders] = useState<Order[]>([]);
   const [erpPurchaseOrders, setErpPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [erpSystemConfig, setErpSystemConfig] = useState<SystemConfig | null>(null);
   const [erpUsers, setErpUsers] = useState<User[]>([]);
+  const [erpProducts, setErpProducts] = useState<Product[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
@@ -172,16 +174,18 @@ export default function App() {
   // ERP State Synchronizer & DbService subscription
   const loadErpStates = useCallback(async () => {
     try {
-      const [ord, po, cfg, usr] = await Promise.all([
+      const [ord, po, cfg, usr, prods] = await Promise.all([
         DbService.getOrders(),
         DbService.getPurchaseOrders(),
         DbService.getConfig(),
-        DbService.getUsers()
+        DbService.getUsers(),
+        DbService.getProducts()
       ]);
       setErpOrders(ord);
       setErpPurchaseOrders(po);
       setErpSystemConfig(cfg);
       setErpUsers(usr);
+      setErpProducts(prods);
     } catch (e) {
       console.error("Error loading ERP states:", e);
     }
@@ -238,6 +242,14 @@ export default function App() {
         if (activeTab !== 'erpPurchase' && activeTab !== 'erpReplenish') {
           setActiveTab('erpPurchase');
         }
+      } else if (currentUser.role === 'data_admin') {
+        // Data administrator can only access financial Price Management, no BI, no other ERP tabs
+        if (systemMode !== 'ERP') {
+          setSystemMode('ERP');
+        }
+        if (activeTab !== 'erpPriceManagement') {
+          setActiveTab('erpPriceManagement');
+        }
       } else {
         // Admins and Region managers are allowed to toggle between both modes, guard standard mode-tab boundaries
         if (systemMode === 'BI' && activeTab.startsWith('erp')) {
@@ -260,12 +272,13 @@ export default function App() {
         setSystemMode('BI');
         setActiveTab('bossDashboard');
       } else {
-        const isErpSpecific = currentUser.role === 'branch' || currentUser.role === 'receptionist' || currentUser.role === 'purchasing';
+        const isErpSpecific = currentUser.role === 'branch' || currentUser.role === 'receptionist' || currentUser.role === 'purchasing' || currentUser.role === 'data_admin';
         if (isErpSpecific && systemMode !== 'ERP') {
           setSystemMode('ERP');
           if (currentUser.role === 'branch') setActiveTab('erpBranchOrder');
           if (currentUser.role === 'receptionist') setActiveTab('erpReception');
           if (currentUser.role === 'purchasing') setActiveTab('erpPurchase');
+          if (currentUser.role === 'data_admin') setActiveTab('erpPriceManagement');
         }
       }
     }
@@ -479,9 +492,33 @@ export default function App() {
   // ==========================================
   // Render Filters Base
   // ==========================================
+  // Dynamically map and associate transactions with costPrice and sellingPrice from erpProducts
+  const mappedTransactions = useMemo(() => {
+    return transactions.map(t => {
+      // Find corresponding product by matching code or name
+      const matchedProd = erpProducts.find(p => p.productCode === t.code || p.productName === t.name);
+      if (matchedProd) {
+        // Use prices maintained by the data administrator
+        const sellingPrice = matchedProd.sellingPrice !== undefined ? matchedProd.sellingPrice : t.price;
+        const costPrice = matchedProd.costPrice !== undefined ? matchedProd.costPrice : (sellingPrice * 0.7); // default 30% margin fallback if cost unset
+        
+        const newAmount = t.qty * sellingPrice;
+        const newProfit = t.qty * (sellingPrice - costPrice);
+        
+        return {
+          ...t,
+          price: sellingPrice,
+          amount: newAmount,
+          profit: newProfit
+        };
+      }
+      return t;
+    });
+  }, [transactions, erpProducts]);
+
   // Filter core retail records for Overview Tab
   const filteredRetailOnlyOverview = useMemo(() => {
-    return transactions.filter(t => {
+    return mappedTransactions.filter(t => {
       if (t.sale_type !== 'store_to_customer') return false;
       
       // Region Lock Check
@@ -496,7 +533,7 @@ export default function App() {
 
       return true;
     });
-  }, [transactions, appliedRegion, appliedStore, appliedCategory, appliedYear, isRegionManager, designatedRegion, regionStoreMap]);
+  }, [mappedTransactions, appliedRegion, appliedStore, appliedCategory, appliedYear, isRegionManager, designatedRegion, regionStoreMap]);
 
   // Filter core stock list for Overview tab KPIs
   const filteredInventoryOverview = useMemo(() => {
@@ -778,6 +815,23 @@ export default function App() {
                     </button>
                   )}
 
+                  {(currentUser?.role === 'admin' || currentUser?.role === 'data_admin') && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('erpPriceManagement');
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center px-6 py-3 transition-all text-left font-semibold text-xs sm:text-sm border-l-4 cursor-pointer ${
+                        activeTab === 'erpPriceManagement'
+                          ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 font-bold'
+                          : 'bg-transparent border-transparent text-emerald-200/70 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <Coins className="w-4 h-4 mr-3 text-emerald-400" />
+                      价格与财务数据维护
+                    </button>
+                  )}
+
                   {currentUser?.role === 'admin' && (
                     <button
                       onClick={() => {
@@ -1028,7 +1082,7 @@ export default function App() {
 
               {activeTab === 'monthly' && (
                 <MonthlyReportTab 
-                  transactions={transactions}
+                  transactions={mappedTransactions}
                   inventory={inventory}
                   storesInCurrentRegion={storesInCurrentRegion}
                   regionStoreMap={regionStoreMap}
@@ -1042,7 +1096,7 @@ export default function App() {
 
               {activeTab === 'headWholesale' && (
                 <WholesaleTab 
-                  transactions={transactions}
+                  transactions={mappedTransactions}
                   inventory={inventory}
                   storesInCurrentRegion={storesInCurrentRegion}
                   regionStoreMap={regionStoreMap}
@@ -1134,6 +1188,13 @@ export default function App() {
               {activeTab === 'erpReplenish' && (
                 <ReplenishmentMgmtView 
                   currentUser={currentUser}
+                />
+              )}
+
+              {activeTab === 'erpPriceManagement' && currentUser && (
+                <PriceManagementView 
+                  currentUser={currentUser}
+                  onShowToast={(text, type) => addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info')}
                 />
               )}
 

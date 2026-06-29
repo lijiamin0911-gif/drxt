@@ -20,7 +20,9 @@ import {
   ArrowRight,
   TrendingDown,
   Globe,
-  Settings
+  Settings,
+  Coins,
+  DollarSign
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
@@ -225,17 +227,32 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
     return Object.values(map).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   }, [filteredSalesForOverview, filterYear, filterMonthStart, filterMonthEnd]);
 
-  // Totals info cards
+  // Totals info cards with automated price/amount linkage
   const summaryCounters = useMemo(() => {
-    const totalQty = filteredSalesForOverview.reduce((sum, r) => sum + r.quantity, 0);
+    let totalQty = 0;
+    let totalAmount = 0;
+    let totalProfit = 0;
+
+    filteredSalesForOverview.forEach(r => {
+      totalQty += r.quantity;
+      const matchedProd = products.find(p => p.productCode === r.productCode);
+      const sellingPrice = matchedProd?.sellingPrice ?? 45; // default fallback if unset
+      const costPrice = matchedProd?.costPrice ?? (sellingPrice * 0.7); // default 30% margin fallback if cost unset
+
+      totalAmount += r.quantity * sellingPrice;
+      totalProfit += r.quantity * (sellingPrice - costPrice);
+    });
+
     const uniqueProducts = new Set(filteredSalesForOverview.map(r => r.productCode)).size;
     const activeBranches = new Set(filteredSalesForOverview.map(r => r.branchName)).size;
     return {
       totalQty,
+      totalAmount,
+      totalProfit,
       uniqueProducts,
       activeBranches
     };
-  }, [filteredSalesForOverview]);
+  }, [filteredSalesForOverview, products]);
 
 
   // ==========================================
@@ -844,36 +861,62 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
             </div>
 
             {/* Quick status overview bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-slate-100">
-              <div className="bg-slate-50 rounded-xl p-3 flex items-center gap-3">
-                <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-4 border-t border-slate-150">
+              <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 flex items-center gap-3">
+                <div className="p-2 bg-blue-100 text-blue-700 rounded-lg shrink-0">
                   <TrendingUp className="w-4 h-4" />
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-400 font-bold uppercase leading-none">累计销售数量</div>
-                  <div className="text-sm font-extrabold text-slate-850 mt-1 font-mono">
-                    {summaryCounters.totalQty.toLocaleString()} <span className="text-xs font-normal text-slate-400">件</span>
+                  <div className="text-xs sm:text-sm font-extrabold text-slate-850 mt-1 font-mono">
+                    {summaryCounters.totalQty.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">件</span>
                   </div>
                 </div>
               </div>
-              <div className="bg-slate-50 rounded-xl p-3 flex items-center gap-3">
-                <div className="p-2 bg-teal-100 text-teal-700 rounded-lg">
+
+              <div className="bg-emerald-50/50 border border-emerald-150/50 rounded-xl p-3 flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0">
+                  <Coins className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase leading-none">累计销售金额</div>
+                  <div className="text-xs sm:text-sm font-extrabold text-emerald-800 mt-1 font-mono">
+                    ¥{summaryCounters.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-rose-50/50 border border-rose-150/50 rounded-xl p-3 flex items-center gap-3">
+                <div className="p-2 bg-rose-100 text-rose-700 rounded-lg shrink-0">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase leading-none">累计预估毛利</div>
+                  <div className="text-xs sm:text-sm font-extrabold text-rose-800 mt-1 font-mono">
+                    ¥{summaryCounters.totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 flex items-center gap-3">
+                <div className="p-2 bg-teal-100 text-teal-700 rounded-lg shrink-0">
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-400 font-bold uppercase leading-none">涉及产品种类</div>
-                  <div className="text-sm font-extrabold text-slate-850 mt-1 font-mono">
-                    {summaryCounters.uniqueProducts} <span className="text-xs font-normal text-slate-400">款</span>
+                  <div className="text-xs sm:text-sm font-extrabold text-slate-850 mt-1 font-mono">
+                    {summaryCounters.uniqueProducts} <span className="text-[10px] font-normal text-slate-400">款</span>
                   </div>
                 </div>
               </div>
-              <div className="bg-slate-50 rounded-xl p-3 flex items-center gap-3">
-                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">
+
+              <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 flex items-center gap-3">
+                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg shrink-0">
                   <Building className="w-4 h-4" />
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-400 font-bold uppercase leading-none">活跃分店范围</div>
-                  <div className="text-sm font-extrabold text-slate-850 mt-1 font-mono">
+                  <div className="text-xs sm:text-sm font-extrabold text-slate-850 mt-1 font-mono">
                     {currentUser.role === 'branch' ? '仅本店' : `${summaryCounters.activeBranches} 家分店`}
                   </div>
                 </div>

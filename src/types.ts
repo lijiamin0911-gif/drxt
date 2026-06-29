@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type Role = 'admin' | 'boss' | 'region_manager' | 'branch' | 'receptionist' | 'purchasing';
+export type Role = 'admin' | 'boss' | 'region_manager' | 'branch' | 'receptionist' | 'purchasing' | 'data_admin';
 
 export interface User {
   id?: string;
@@ -165,6 +165,9 @@ export interface Product {
   isApproved: boolean;
   createdAt: string;
   updatedAt: string;
+
+  costPrice?: number;
+  sellingPrice?: number;
 
   // Management operations fields
   isPermanentlyCancelled?: boolean;

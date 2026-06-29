@@ -681,8 +681,11 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
     const lines = text.split('\n');
     const newImportedRows: NewItemRow[] = [];
     let parsedCount = 0;
+    const validationErrors: string[] = [];
     
+    let rowIdx = 0;
     for (let line of lines) {
+      rowIdx++;
       line = line.trim();
       if (!line) continue;
       
@@ -690,7 +693,10 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
       if (
         line.includes('商品编码') || 
         line.includes('商品名称') || 
-        line.includes('规格型号') || 
+        line.includes('产品编码') || 
+        line.includes('产品名称') || 
+        line.includes('规格') || 
+        line.includes('数量') || 
         line.includes('CODE') || 
         line.includes('Code') || 
         line.includes('编码')
@@ -700,51 +706,65 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
       
       // Auto split columns: supports tab, commas, semicolons, or vertical bar
       const parts = line.split(/[,\t;|，；｜]/).map(p => p.trim());
-      if (parts.length < 3) continue; // Needs at least productCode, productName, specs/quantity
+      if (parts.length < 2) {
+        continue; // Skip lines with too few elements
+      }
       
       const code = parts[0] || '';
-      const name = parts[1] || '导入未定名产品';
-      const specs = parts[2] || '普规';
+      const name = parts[1] || '';
+      const specs = parts[2] || '通用规格';
       const qtyStr = parts[3] || '1';
-      const quantity = parseInt(qtyStr, 10) || 1;
       const supplier = parts[4] || '';
-      const remark = parts[5] || '';
+      const typeStr = parts[5] || '常规';
+      const remark = parts[6] || '文字粘贴识别导入';
+      
+      if (!code && !name) {
+        continue;
+      }
+      if (!code) {
+        validationErrors.push(`第 ${rowIdx} 行：[产品编码] 不能为空。`);
+        continue;
+      }
+      if (!name) {
+        validationErrors.push(`第 ${rowIdx} 行：[产品名称] 不能为空。`);
+        continue;
+      }
+
+      const quantity = parseInt(qtyStr, 10);
+      if (isNaN(quantity) || quantity <= 0) {
+        validationErrors.push(`第 ${rowIdx} 行：[数量] [${qtyStr}] 非法，必须是正整数。`);
+        continue;
+      }
       
       // Search matching official goods to fill values
       const matched = officialProducts.find(
         p => p.productCode.trim().toLowerCase() === code.trim().toLowerCase()
       );
       
-      if (matched) {
-        newImportedRows.push({
-          productCode: matched.productCode,
-          productName: matched.productName,
-          specs: matched.specs,
-          quantity: Math.max(1, quantity),
-          supplier: matched.defaultSupplier || '系统自提厂商',
-          orderType: 'conventional',
-          remark: remark || '文字快速导入'
-        });
-      } else {
-        newImportedRows.push({
-          productCode: code ? code.toUpperCase() : 'NEW-PROD',
-          productName: name,
-          specs: specs,
-          quantity: Math.max(1, quantity),
-          supplier: supplier || '随单指定厂商',
-          orderType: 'custom',
-          remark: remark || '⚠️新品/未提交过 (请在此处补充说明新品详情需求)'
-        });
-      }
+      const finalType = (typeStr.includes('特定') || typeStr.includes('custom') || typeStr.includes('特定/新品')) ? 'custom' : 'conventional';
+
+      newImportedRows.push({
+        productCode: matched ? matched.productCode : code.toUpperCase(),
+        productName: matched ? matched.productName : name,
+        specs: matched ? matched.specs : specs,
+        quantity: quantity,
+        supplier: matched ? (matched.defaultSupplier || '系统自提厂商') : (supplier || '自主指定厂商'),
+        orderType: matched ? 'conventional' : finalType,
+        remark: remark
+      });
       parsedCount++;
     }
     
+    if (validationErrors.length > 0) {
+      alert(`❌ 文本导入数据校验失败，请修改后重试：\n\n${validationErrors.slice(0, 10).join('\n')}${validationErrors.length > 10 ? `\n...等共 ${validationErrors.length} 个错误` : ''}`);
+      return;
+    }
+
     if (newImportedRows.length === 0) {
-      alert('未识别到有效的多行数据，请检测是否按：[商品编码,商品名称,规格型号,订货数量] 顺序排列，由逗号/空格或Tab分隔。');
+      alert('未识别到任何有效的订货数据。格式提示：产品编码,产品名称,规格型号,数量,供应商,类型,备注');
       return;
     }
     
-    // Replace current list if only empty row exists, otherwise append
     const isOnlyEmptyRowRow = orderRows.length === 1 && orderRows[0].productCode === '';
     if (isOnlyEmptyRowRow) {
       setOrderRows(newImportedRows);
@@ -753,34 +773,57 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
     }
     setImportText('');
     setShowImportPanel(false);
-    alert(`成功从粘贴文本中识别录入 ${parsedCount} 款订货项目！已悉数加载合并到下方表格中，商品库不存在的项已自动标记为“非常规新品”。`);
+    alert(`🎉 成功从粘贴文本中智能识别并录入 ${parsedCount} 款订货项目！您可以在下方列表中进行修改、删除，最后确认提交。`);
   };
 
   const downloadOrderTemplate = () => {
     try {
       const data = [
-        ["商品编码", "商品名称", "规格型号", "订货数量", "首选供应商/厂家", "单行详细备注 / 定制需求说明"],
-        ["PROD-A01", "九牧不锈钢暗装高档水龙头", "SS-901-HM", 15, "九牧卫浴制造厂", "一楼男洗手间损坏更换"],
-        ["PROD-B05", "飞利浦智能LED吸顶灯 50W", "PL-M50W-LED", 25, "飞利浦合肥照明厂", "二层前厅天花板吊顶替换"],
-        ["NEW-TEM-88", "合金防盗特种防爆挂锁", "LT-88MM-HIGH-SECURITY", 5, "温州特种锁厂", "⚠️非标新品：材质需要全钢，钥匙配4把"]
+        ["分店名称", "产品编码", "产品名称", "规格型号", "数量", "供应商", "订单类型", "备注"],
+        ["城东分店", "PROD-A01", "九牧不锈钢暗装高档水龙头", "SS-901-HM", 15, "九牧卫浴制造厂", "常规", "一楼男洗手间损坏更换"],
+        ["城南分店", "PROD-B05", "飞利浦智能LED吸顶灯 50W", "PL-M50W-LED", 25, "飞利浦合肥照明厂", "常规", "二层前厅天花板吊顶替换"],
+        ["总部备货库", "PROD-NEW-99", "高级纳米防爆花洒套件", "NM-HS-99", 8, "广州卫浴五金厂", "特定", "客制化样板展示需求"]
       ];
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(data);
       
       ws['!cols'] = [
-        { wch: 20 },
+        { wch: 15 },
+        { wch: 18 },
         { wch: 32 },
-        { wch: 26 },
+        { wch: 24 },
+        { wch: 10 },
+        { wch: 24 },
         { wch: 12 },
-        { wch: 28 },
-        { wch: 48 }
+        { wch: 36 }
       ];
 
-      XLSX.utils.book_append_sheet(wb, ws, "分店批量订货提报表");
-      XLSX.writeFile(wb, "分店批量订货提报标准模板.xlsx");
+      XLSX.utils.book_append_sheet(wb, ws, "批量订单导入模板");
+      XLSX.writeFile(wb, "批量订货提报标准模板.xlsx");
     } catch (e: any) {
       alert("下载订单模板失败：" + e.message);
+    }
+  };
+
+  const downloadOrderCSVTemplate = () => {
+    try {
+      const headers = ["分店名称", "产品编码", "产品名称", "规格型号", "数量", "供应商", "订单类型", "备注"];
+      const row1 = ["城东分店", "PROD-A01", "九牧不锈钢暗装高档水龙头", "SS-901-HM", "15", "九牧卫浴制造厂", "常规", "一楼男洗手间损坏更换"];
+      const row2 = ["城南分店", "PROD-B05", "飞利浦智能LED吸顶灯 50W", "PL-M50W-LED", "25", "飞利浦合肥照明厂", "常规", "二层前厅天花板吊顶替换"];
+      
+      const csvContent = "\uFEFF" + [headers.join(','), row1.join(','), row2.join(',')].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', "批量订货提报标准模板.csv");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e: any) {
+      alert("下载 CSV 模板失败：" + e.message);
     }
   };
 
@@ -800,63 +843,123 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
         const newImportedRows: NewItemRow[] = [];
         let headerSkipped = false;
         let parsedCount = 0;
+        const validationErrors: string[] = [];
+        const codeWarnings: string[] = [];
+        
+        let branchColIndex = 0;
+        let codeColIndex = 1;
+        let nameColIndex = 2;
+        let specsColIndex = 3;
+        let qtyColIndex = 4;
+        let supplierColIndex = 5;
+        let typeColIndex = 6;
+        let remarkColIndex = 7;
 
+        // Examine row 0 to find headers dynamically
+        const firstRow = rawJson[0];
+        if (Array.isArray(firstRow)) {
+          const matchedHeaders = firstRow.map(h => String(h || '').trim());
+          const findIndex = (synonyms: string[]) => {
+            return matchedHeaders.findIndex(h => synonyms.some(syn => h.includes(syn)));
+          };
+          
+          const branchIdx = findIndex(['分店']);
+          if (branchIdx !== -1) branchColIndex = branchIdx;
+          
+          const codeIdx = findIndex(['编码', '代码', 'CODE', 'Code', '货号']);
+          if (codeIdx !== -1) codeColIndex = codeIdx;
+          
+          const nameIdx = findIndex(['名称', 'NAME', 'Name', '商品', '产品']);
+          if (nameIdx !== -1) nameColIndex = nameIdx;
+          
+          const specsIdx = findIndex(['规格', '型号', 'SPEC', 'Specs']);
+          if (specsIdx !== -1) specsColIndex = specsIdx;
+          
+          const qtyIdx = findIndex(['数量', '订货数量', '采购数量', 'QTY', 'Qty']);
+          if (qtyIdx !== -1) qtyColIndex = qtyIdx;
+          
+          const supIdx = findIndex(['供应商', '厂商', '厂家', 'SUPPLIER']);
+          if (supIdx !== -1) supplierColIndex = supIdx;
+          
+          const typeIdx = findIndex(['类型', '订单类型', '下单类型']);
+          if (typeIdx !== -1) typeColIndex = typeIdx;
+          
+          const remIdx = findIndex(['备注', '说明', 'REMARK']);
+          if (remIdx !== -1) remarkColIndex = remIdx;
+        }
+
+        let rowIdx = 0;
         for (const row of rawJson) {
+          rowIdx++;
           if (!Array.isArray(row) || row.length === 0) continue;
           
           const col0Str = String(row[0] || '').trim();
           if (
             !headerSkipped &&
-            (col0Str.includes('商品编码') ||
-              col0Str.includes('产品编码') ||
+            (col0Str.includes('商品') ||
+              col0Str.includes('产品') ||
+              col0Str.includes('编码') ||
               col0Str.includes('CODE') ||
-              col0Str.includes('Code') ||
-              col0Str.includes('代码') ||
-              col0Str.includes('编码'))
+              col0Str.includes('分店') ||
+              col0Str.includes('名称') ||
+              col0Str.includes('类型'))
           ) {
             headerSkipped = true;
             continue;
           }
 
-          const code = String(row[0] || '').trim();
-          const name = String(row[1] || '').trim();
-          const specs = String(row[2] || '').trim();
-          const qtyVal = parseInt(String(row[3] || '1'), 10) || 1;
-          const supplier = String(row[4] || '').trim();
-          const remark = String(row[6] || row[5] || '').trim();
+          const code = String(row[codeColIndex] || '').trim();
+          const name = String(row[nameColIndex] || '').trim();
+          const specs = String(row[specsColIndex] || '').trim();
+          const qtyRaw = row[qtyColIndex];
+          const supplier = String(row[supplierColIndex] || '').trim();
+          const typeStr = String(row[typeColIndex] || '').trim();
+          const remark = String(row[remarkColIndex] || '').trim();
 
-          if (!code && !name) continue;
+          // Validation
+          if (!code && !name) {
+            continue; // Skip empty rows silently
+          }
+          
+          if (!code) {
+            validationErrors.push(`第 ${rowIdx} 行：[产品编码] 属于必填项，当前为空。`);
+            continue;
+          }
+          if (!name) {
+            validationErrors.push(`第 ${rowIdx} 行：[产品名称] 属于必填项，当前为空。`);
+            continue;
+          }
+
+          const qtyVal = parseInt(String(qtyRaw || ''), 10);
+          if (isNaN(qtyVal) || qtyVal <= 0) {
+            validationErrors.push(`第 ${rowIdx} 行：[数量] [${qtyRaw || '空'}] 格式非法，必须是大于 0 的正整数。`);
+            continue;
+          }
 
           const matched = officialProducts.find(
             p => p.productCode.trim().toLowerCase() === code.trim().toLowerCase()
           );
 
-          if (matched) {
-            newImportedRows.push({
-              productCode: matched.productCode,
-              productName: matched.productName,
-              specs: matched.specs,
-              quantity: Math.max(1, qtyVal),
-              supplier: matched.defaultSupplier || '系统自提厂商',
-              orderType: 'conventional',
-              remark: remark || 'Excel文件导入'
-            });
-          } else {
-            newImportedRows.push({
-              productCode: code ? code.toUpperCase() : 'NEW-' + Math.floor(1000 + Math.random() * 9000),
-              productName: name || '新品自填货项',
-              specs: specs || '普规规格',
-              quantity: Math.max(1, qtyVal),
-              supplier: supplier || '随单指定厂商',
-              orderType: 'custom',
-              remark: remark || '⚠️新品/未提交过 (请分店核实补充此处的详细备注)'
-            });
+          if (!matched) {
+            codeWarnings.push(`第 ${rowIdx} 行：产品编码 [${code}] 在官方产品库中未注册，系统将判定为“非常规新品”。`);
           }
+
+          const finalType = (typeStr.includes('特定') || typeStr.includes('custom') || typeStr.includes('特定/新品')) ? 'custom' : 'conventional';
+
+          newImportedRows.push({
+            productCode: matched ? matched.productCode : code.toUpperCase(),
+            productName: matched ? matched.productName : name,
+            specs: matched ? matched.specs : (specs || '通用规格'),
+            quantity: qtyVal,
+            supplier: matched ? (matched.defaultSupplier || '系统自提厂商') : (supplier || '自主指定厂商'),
+            orderType: matched ? 'conventional' : finalType,
+            remark: remark || 'Excel文件导入'
+          });
           parsedCount++;
         }
 
-        if (newImportedRows.length === 0) {
-          alert('未能从选择的文件中提取到可读的行属性（格式要求商品编码作为第一列）');
+        if (validationErrors.length > 0) {
+          alert(`❌ 导入失败，发现以下数据校验错误，请修改后重试：\n\n${validationErrors.slice(0, 10).join('\n')}${validationErrors.length > 10 ? `\n...等共 ${validationErrors.length} 个错误` : ''}`);
           return;
         }
 
@@ -867,15 +970,18 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
           setOrderRows([...orderRows, ...newImportedRows]);
         }
         setShowImportPanel(false);
-        alert(`一键文件导入成功！已高效读取 ${parsedCount} 笔数据至表格，系统比对不符的行已被自动识别为新品，已标亮橙色标记以引导分店自主备注。`);
+
+        let successMsg = `🎉 导入成功！已高效读取 ${parsedCount} 笔数据至编辑草稿表中。您可以在下方列表中进行二次修改、删除，无误后一键提交。`;
+        if (codeWarnings.length > 0) {
+          successMsg += `\n\n⚠️ 温馨提示 (共 ${codeWarnings.length} 个非常规新品)：\n${codeWarnings.slice(0, 3).join('\n')}${codeWarnings.length > 3 ? `\n...以及其他 ${codeWarnings.length - 3} 个未注册编码` : ''}`;
+        }
+        alert(successMsg);
       } catch (err) {
         console.error(err);
         alert('解析 Excel 或 CSV 发生错误，请确认数据排布与表头格式正常。');
       }
     };
     reader.readAsBinaryString(file);
-    // Reset file input value
-    e.target.value = '';
   };
 
   const getStatusBadge = (status: string) => {
@@ -1317,10 +1423,18 @@ export default function BranchOrderView({ orders: rawOrders, purchaseOrders = []
                   <button
                     type="button"
                     onClick={downloadOrderTemplate}
-                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 rounded text-[10px] font-bold transition-colors cursor-pointer border border-emerald-200"
-                    title="下载格式完全对接系统的标准微软 Excel 提货模版"
+                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 rounded-lg text-[10px] font-bold transition-colors cursor-pointer border border-emerald-200 shadow-3xs"
+                    title="下载格式完全对接系统的标准微软 Excel 订单导入模板"
                   >
-                    📥 下载标准 Excel 模板.xlsx
+                    📥 下载 Excel 模板 (.xlsx)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadOrderCSVTemplate}
+                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 rounded-lg text-[10px] font-bold transition-colors cursor-pointer border border-emerald-200 shadow-3xs"
+                    title="下载格式完全对接系统的标准 CSV 格式订单导入模板"
+                  >
+                    📥 下载 CSV 模板 (.csv)
                   </button>
                   <button
                     type="button"
