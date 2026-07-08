@@ -136,6 +136,53 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
             </button>
           </form>
 
+          {/* Quick Login Preset Accounts Panel */}
+          <div className="mt-6 pt-5 border-t border-slate-100">
+            <p className="text-xs font-semibold text-slate-500 mb-2.5 flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-blue-500" />
+              系统预设测试账户一键快捷登录：
+            </p>
+            <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+              {[
+                { label: '⚙️ 超级管理员', name: 'admin', pin: '1111' },
+                { label: '⚙️ 副管理员', name: '副管理员', pin: '1111' },
+                { label: '💼 采购员', name: '采购员', pin: '1111' },
+                { label: '💁 前台验收', name: '前台验收员', pin: '1111' },
+                { label: '🏠 黄石店长', name: '黄石店店长', pin: '1111' },
+              ].map((acc) => (
+                <button
+                  key={acc.name}
+                  type="button"
+                  onClick={() => {
+                    setUsername(acc.name);
+                    setPassword(acc.pin);
+                    setErrorMsg('');
+                  }}
+                  className="px-2.5 py-1.5 text-left text-xs bg-slate-50 hover:bg-blue-50 hover:text-blue-600 border border-slate-200 hover:border-blue-200 rounded-lg transition-colors flex flex-col cursor-pointer active:scale-95"
+                >
+                  <span className="font-bold truncate">{acc.label}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">PIN: {acc.pin}</span>
+                </button>
+              ))}
+            </div>
+            
+            <div className="mt-3.5 flex items-center justify-between">
+              <span className="text-[10px] text-slate-400">密码还原：若曾修改密码导致登录失败</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('确定要清空/重置本系统的全部本地测试数据和账户吗？')) {
+                    onResetUsers();
+                    setErrorMsg('✅ 系统账号已重置！请点击快捷登录面板进行登录（管理员密码已还原为 1111 / 123）。');
+                  }
+                }}
+                className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline cursor-pointer bg-transparent border-none p-0"
+              >
+                一键重置系统
+              </button>
+            </div>
+          </div>
+
 
 
 
