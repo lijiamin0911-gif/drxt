@@ -128,7 +128,7 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
               {isValidating ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  正在安全验证中...
+                  正在连接服务器...
                 </>
               ) : (
                 '登 录'

@@ -367,69 +367,57 @@ export default function App() {
   // Actions
   // ==========================================
   const handleLogin = async (userIn: string, passIn: string): Promise<boolean> => {
+    const cleanUserIn = userIn.trim();
+    const cleanPassIn = passIn.trim();
+
+    // Helper to match user credentials safely
+    const findInList = (list: User[]) => {
+      return list.find(u => {
+        const uName = (u.username || '').trim();
+        const uPin = (u.pin || '').trim();
+        const uPass = (u.password || '').trim();
+        return uName === cleanUserIn && (uPin === cleanPassIn || uPass === cleanPassIn);
+      });
+    };
+
     let matched: User | undefined = undefined;
 
-    // 1. Fetch freshest users list directly from DB/Server to bypass any state synchronization delay
-    try {
-      const freshErpUsers = await DbService.getUsers();
-      if (freshErpUsers && freshErpUsers.length > 0) {
-        setErpUsers(freshErpUsers);
-        const cleanUserIn = userIn.trim();
-        const cleanPassIn = passIn.trim();
-        matched = freshErpUsers.find(u => {
-          const uName = (u.username || '').trim();
-          const uPin = (u.pin || '').trim();
-          const uPass = (u.password || '').trim();
-          return uName === cleanUserIn && (uPin === cleanPassIn || uPass === cleanPassIn);
-        });
-      }
-    } catch (e) {
-      console.warn("Dynamic user retrieval during login failed, falling back to local states:", e);
+    // 1. FAST PATH (Instant): Check cached/in-memory states first to bypass network latency entirely
+    if (erpUsers && erpUsers.length > 0) {
+      matched = findInList(erpUsers);
     }
-
-    // 2. Fallback: Check local BI Users state
+    if (!matched && users && users.length > 0) {
+      matched = findInList(users);
+    }
     if (!matched) {
-      const cleanUserIn = userIn.trim();
-      const cleanPassIn = passIn.trim();
-      matched = users.find(u => {
-        const uName = (u.username || '').trim();
-        const uPin = (u.pin || '').trim();
-        const uPass = (u.password || '').trim();
-        return uName === cleanUserIn && (uPin === cleanPassIn || uPass === cleanPassIn);
-      });
+      matched = findInList(DEFAULT_USERS);
     }
 
-    // 3. Fallback: Check local ERP Users state (if server call above was cached or failed)
-    if (!matched && erpUsers && erpUsers.length > 0) {
-      const cleanUserIn = userIn.trim();
-      const cleanPassIn = passIn.trim();
-      matched = erpUsers.find(u => {
-        const uName = (u.username || '').trim();
-        const uPin = (u.pin || '').trim();
-        const uPass = (u.password || '').trim();
-        return uName === cleanUserIn && (uPin === cleanPassIn || uPass === cleanPassIn);
-      });
-    }
-
-    // 4. Fallback: Check raw local storage fallback
+    // 2. Fallback FAST PATH: Read raw localStorage fallback
     if (!matched) {
       try {
         const rawDbUsers = localStorage.getItem('db_users');
         if (rawDbUsers) {
           const parsed: User[] = JSON.parse(rawDbUsers);
           if (Array.isArray(parsed)) {
-            const cleanUserIn = userIn.trim();
-            const cleanPassIn = passIn.trim();
-            matched = parsed.find(u => {
-              const uName = (u.username || '').trim();
-              const uPin = (u.pin || '').trim();
-              const uPass = (u.password || '').trim();
-              return uName === cleanUserIn && (uPin === cleanPassIn || uPass === cleanPassIn);
-            });
+            matched = findInList(parsed);
           }
         }
       } catch (e) {
         console.error("Error reading fallback db_users:", e);
+      }
+    }
+
+    // 3. SLOW PATH: Only query server dynamically if credentials are not matched in local cache
+    if (!matched) {
+      try {
+        const freshErpUsers = await DbService.getUsers();
+        if (freshErpUsers && freshErpUsers.length > 0) {
+          setErpUsers(freshErpUsers);
+          matched = findInList(freshErpUsers);
+        }
+      } catch (e) {
+        console.warn("Dynamic user retrieval failed, falling back to offline defaults:", e);
       }
     }
 
@@ -457,7 +445,7 @@ export default function App() {
       return true;
     }
 
-    // 5. Hardcoded Fallback: check defaults directly in case state is syncing slowly
+    // 4. Hardcoded Fallback: check defaults directly in case state is syncing slowly
     const fallbackMatched = DEFAULT_USERS.find(u => u.username === userIn && u.password === passIn);
     if (fallbackMatched) {
       setCurrentUser(fallbackMatched);
