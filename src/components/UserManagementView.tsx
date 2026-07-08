@@ -869,7 +869,6 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                     <option value="branch">分店账号 (只能提交及查看本店订单)</option>
                     <option value="receptionist">前台账号 (核对并一键批量确认订单)</option>
                     <option value="purchasing">采购账号 (合并采购单、厂家发货跟踪)</option>
-                    <option value="data_admin">数据管理员 (价格与财务数据维护，提交/汇总数据给老板)</option>
                     <option value="admin">系统管理员 - 总/副 (最高账号管理、报警线及查看日志)</option>
                   </select>
                 </div>
@@ -998,7 +997,6 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
                         <option value="branch">分店账号 (只能提交及查看本店订单)</option>
                         <option value="receptionist">前台账号 (核对并一键批量确认订单)</option>
                         <option value="purchasing">采购账号 (合并采购单、厂家发货跟踪)</option>
-                        <option value="data_admin">数据管理员 (价格与财务数据维护，提交/汇总数据给老板)</option>
                         <option value="admin">系统管理员 - 总/副 (最高账号管理、报警线及查看日志)</option>
                       </select>
                     </div>
