@@ -82,11 +82,16 @@ export default function App() {
   // Toast Helper System
   // ==========================================
   const addToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = Date.now().toString() + Math.random().toString();
-    setToasts(prev => [...prev, { id, text, type }]);
-    setTimeout(() => {
-      removeToast(id);
-    }, 4000);
+    setToasts(prev => {
+      if (prev.some(t => t.text === text)) {
+        return prev;
+      }
+      const id = Date.now().toString() + Math.random().toString();
+      setTimeout(() => {
+        removeToast(id);
+      }, 4000);
+      return [...prev, { id, text, type }];
+    });
   };
 
   const removeToast = (id: string) => {
@@ -243,11 +248,10 @@ export default function App() {
           setActiveTab('erpPurchase');
         }
       } else if (currentUser.role === 'data_admin') {
-        // Data administrator can only access financial Price Management, no BI, no other ERP tabs
-        if (systemMode !== 'ERP') {
-          setSystemMode('ERP');
-        }
-        if (activeTab !== 'erpPriceManagement') {
+        // Data administrator (行政后台) can access financial Price Management and BI dashboards to submit/manage data!
+        if (systemMode === 'BI' && activeTab.startsWith('erp')) {
+          setActiveTab('overview');
+        } else if (systemMode === 'ERP' && !activeTab.startsWith('erp')) {
           setActiveTab('erpPriceManagement');
         }
       } else {
@@ -272,13 +276,12 @@ export default function App() {
         setSystemMode('BI');
         setActiveTab('bossDashboard');
       } else {
-        const isErpSpecific = currentUser.role === 'branch' || currentUser.role === 'receptionist' || currentUser.role === 'purchasing' || currentUser.role === 'data_admin';
+        const isErpSpecific = currentUser.role === 'branch' || currentUser.role === 'receptionist' || currentUser.role === 'purchasing';
         if (isErpSpecific && systemMode !== 'ERP') {
           setSystemMode('ERP');
           if (currentUser.role === 'branch') setActiveTab('erpBranchOrder');
           if (currentUser.role === 'receptionist') setActiveTab('erpReception');
           if (currentUser.role === 'purchasing') setActiveTab('erpPurchase');
-          if (currentUser.role === 'data_admin') setActiveTab('erpPriceManagement');
         }
       }
     }
@@ -580,8 +583,8 @@ export default function App() {
 
             {/* Sidebar Navigation */}
             <nav className="flex-1 py-4 overflow-y-auto space-y-1">
-              {/* Optional Portal Switcher: Non-boss admins & region managers only */}
-              {(currentUser?.role === 'admin' || currentUser?.role === 'region_manager') && (
+              {/* Optional Portal Switcher: Non-boss admins, region managers & data admins (行政后台) */}
+              {(currentUser?.role === 'admin' || currentUser?.role === 'region_manager' || currentUser?.role === 'data_admin') && (
                 <div className="px-4 pb-4">
                   <div className="bg-black/20 p-1 rounded-xl flex items-center justify-between gap-1 border border-white/5">
                     <button
@@ -592,8 +595,8 @@ export default function App() {
                       }}
                       className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                         systemMode === 'BI'
-                           ? 'bg-white/15 text-white shadow-sm'
-                           : 'text-blue-200/60 hover:text-blue-100'
+                          ? 'bg-white/15 text-white shadow-sm'
+                          : 'text-blue-200/60 hover:text-blue-100'
                       }`}
                     >
                       <Activity className="w-3.5 h-3.5" />
@@ -604,6 +607,8 @@ export default function App() {
                         setSystemMode('ERP');
                         if (currentUser.role === 'region_manager') {
                           setActiveTab('erpBranchOrder');
+                        } else if (currentUser.role === 'data_admin') {
+                          setActiveTab('erpPriceManagement');
                         } else {
                           setActiveTab('erpDashboard');
                         }
@@ -611,8 +616,8 @@ export default function App() {
                       }}
                       className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                         systemMode === 'ERP'
-                           ? 'bg-emerald-500 text-white shadow-md'
-                           : 'text-blue-200/60 hover:text-blue-100'
+                          ? 'bg-emerald-500 text-white shadow-md'
+                          : 'text-blue-200/60 hover:text-blue-100'
                       }`}
                     >
                       <Database className="w-3.5 h-3.5" />
@@ -690,10 +695,10 @@ export default function App() {
                     账面库存明细
                   </button>
 
-                  {currentUser?.role === 'boss' && (
+                  {(currentUser?.role === 'boss' || currentUser?.role === 'admin' || currentUser?.role === 'data_admin') && (
                     <>
                       <div className="px-6 py-1.5 pt-4 text-xs font-bold text-amber-200/50 uppercase tracking-widest">
-                        老板决策专区
+                        老板与后台数据管理
                       </div>
                       <button
                         onClick={() => {
@@ -707,7 +712,7 @@ export default function App() {
                         }`}
                       >
                         <TrendingUp className="w-4 h-4 mr-3 text-amber-400" />
-                        老板专属决策大屏
+                        经营分析与数据大屏
                       </button>
                     </>
                   )}

@@ -893,8 +893,8 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                   本年全部
                 </button>
                 
-                {/* Save sales record access limited to admin & purchasing roles */}
-                {(currentUser.role === 'admin' || currentUser.role === 'purchasing') && (
+                {/* Save sales record access limited to admin, purchasing & data_admin roles */}
+                {(currentUser.role === 'admin' || currentUser.role === 'purchasing' || currentUser.role === 'data_admin') && (
                   <button
                     onClick={() => {
                       setImportError('');
