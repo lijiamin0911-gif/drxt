@@ -62,8 +62,23 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
     }
   }, [currentUser]);
 
-  // Active sub-tab inside page: 'overview' vs 'yoy'
-  const [currentTab, setCurrentTab] = useState<'overview' | 'yoy'>('overview');
+  // Active sub-tab inside page: 'overview' vs 'yoy' vs 'admin'
+  const [currentTab, setCurrentTab] = useState<'overview' | 'yoy' | 'admin'>('overview');
+
+  // Admin Data Management states
+  const [editingRecord, setEditingRecord] = useState<SalesRecord | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false);
+  const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
+
+  // Selective delete filters in Admin panel
+  const [adminDelMonth, setAdminDelMonth] = useState<string>('all');
+  const [adminDelBranch, setAdminDelBranch] = useState<string>('all');
+  const [adminDelProductCode, setAdminDelProductCode] = useState<string>('all');
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
 
   // Trigger toasts
   const triggerLocalToast = (text: string, type: 'success' | 'info' | 'error' = 'info') => {
@@ -430,6 +445,28 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
     
     setIsSubmittingImport(true);
     try {
+      const operator = {
+        id: currentUser.id,
+        name: currentUser.username,
+        role: currentUser.role
+      };
+
+      // If "replace" mode is selected, we clear existing records for the months and branches being imported first
+      if (importMode === 'replace') {
+        // Extract unique combinations of month + branchName
+        const uniqueCombos = Array.from(
+          new Set(importPreview.map(item => `${item.month}|${item.branchName}`))
+        ).map((str: string) => {
+          const [month, branchName] = str.split('|');
+          return { month, branchName };
+        });
+
+        // Delete existing records matching these filters
+        for (const combo of uniqueCombos) {
+          await DbService.deleteSalesRecordsByFilter(combo, operator);
+        }
+      }
+
       const timestamp = new Date().toLocaleString();
       const mappedToStore: SalesRecord[] = importPreview.map((item, index) => ({
         id: `sal_${Date.now()}_${index}_${Math.random().toString(36).substring(2,6)}`,
@@ -443,16 +480,19 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
         importedAt: timestamp
       }));
 
-      await DbService.saveSalesRecords(mappedToStore, {
-        id: currentUser.id,
-        name: currentUser.username,
-        role: currentUser.role
-      });
+      await DbService.saveSalesRecords(mappedToStore, operator);
 
-      triggerLocalToast(`🎉 成功导入 ${mappedToStore.length} 条销售流水档案！`, 'success');
+      triggerLocalToast(
+        importMode === 'replace' 
+          ? `🎉 成功覆盖并替换原有月份分店数据，录入 ${mappedToStore.length} 条全新实际销售流水档案！`
+          : `🎉 成功追加导入 ${mappedToStore.length} 条销售流水档案！`, 
+        'success'
+      );
       setShowImportModal(false);
       setImportPreview([]);
       setImportText('');
+      // Reset mode to append for future imports
+      setImportMode('append');
     } catch (e) {
       console.error(e);
       alert('导入发生意外失败，请检测控制台排查');
@@ -731,6 +771,17 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
             <BarChart2 className="w-3.5 h-3.5 text-indigo-600" />
             <span>产品同比对比分析</span>
           </button>
+          {currentUser.role !== 'branch' && (
+            <button
+              onClick={() => setCurrentTab('admin')}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                currentTab === 'admin' ? 'bg-white text-rose-700 shadow-sm' : 'text-slate-500 hover:text-rose-600'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5 text-rose-600" />
+              <span>智能大屏数据管理</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1063,6 +1114,7 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                         <th className="p-3">商品通用名称</th>
                         <th className="p-3">规格型号描述</th>
                         <th className="p-3 text-right">已售去皮数</th>
+                        {currentUser.role !== 'branch' && <th className="p-3 text-center w-28">操作</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs text-slate-705">
@@ -1084,6 +1136,58 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                           <td className="p-3 font-extrabold text-slate-900">{rec.productName}</td>
                           <td className="p-3 text-slate-500">{rec.specs}</td>
                           <td className="p-3 text-right font-black font-mono text-blue-700">{rec.quantity} <span className="text-[10px] font-normal text-slate-400">件</span></td>
+                          {currentUser.role !== 'branch' && (
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => setEditingRecord(rec)}
+                                  className="text-[10px] font-extrabold text-indigo-600 hover:text-indigo-900 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  编辑
+                                </button>
+                                {deleteConfirmId === rec.id ? (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={async () => {
+                                        setIsDeletingRecord(true);
+                                        try {
+                                          await DbService.deleteSalesRecord(rec.id, {
+                                            id: currentUser.id,
+                                            name: currentUser.username,
+                                            role: currentUser.role
+                                          });
+                                          triggerLocalToast('🗑️ 成功删除该条销售业绩流水', 'success');
+                                        } catch (e) {
+                                          console.error(e);
+                                          alert('删除失败，请重试');
+                                        } finally {
+                                          setIsDeletingRecord(false);
+                                          setDeleteConfirmId(null);
+                                        }
+                                      }}
+                                      disabled={isDeletingRecord}
+                                      className="text-[10px] font-black text-white bg-rose-600 hover:bg-rose-750 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                                    >
+                                      是
+                                    </button>
+                                    <button
+                                      onClick={() => setDeleteConfirmId(null)}
+                                      className="text-[10px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                                    >
+                                      否
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => setDeleteConfirmId(rec.id)}
+                                    className="text-[10px] font-extrabold text-rose-600 hover:text-rose-900 px-2 py-1 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    删除
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       ))}
 
@@ -1098,7 +1202,7 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                         return isMonth;
                       }).length === 0 && (
                         <tr>
-                          <td colSpan={7} className="p-8 text-center text-slate-400 italic">该月份下没有在本店匹配到任何已导入的销售详细流水</td>
+                          <td colSpan={currentUser.role !== 'branch' ? 8 : 7} className="p-8 text-center text-slate-400 italic">该月份下没有在本店匹配到任何已导入的销售详细流水</td>
                         </tr>
                       )}
                     </tbody>
@@ -1545,6 +1649,412 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
 
 
       {/* ========================================================
+          SUB-TAB 3: DATA MANAGEMENT (数据管理控制台)
+          ======================================================== */}
+      {currentTab === 'admin' && currentUser.role !== 'branch' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 animate-fadeIn">
+            
+            {/* Left Panel: Selective clear conditions */}
+            <div className="bg-white rounded-3xl border border-slate-150 p-6 shadow-sm md:col-span-8 space-y-6">
+              <div className="flex items-center gap-2 pb-4 border-b border-slate-100">
+                <span className="p-2 bg-rose-50 text-rose-600 rounded-xl">
+                  <Sliders className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">按维度选择性清除/替换往期业绩</h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">支持按指定销售月份、特定分店、或指定产品编码快速批量删除历史销售条目</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Month selection */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                    按特定月份：
+                  </label>
+                  <select
+                    value={adminDelMonth}
+                    onChange={e => setAdminDelMonth(e.target.value)}
+                    className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-xl focus:border-indigo-500 focus:outline-none font-bold text-slate-800"
+                  >
+                    <option value="all">-- 不限月份 (全部月份) --</option>
+                    {/* Extract unique months dynamically from records */}
+                    {Array.from(new Set(salesRecords.map(r => r.month))).sort().reverse().map((mo: string) => (
+                      <option key={mo} value={mo}>{mo.split('-')[0]}年{parseInt(mo.split('-')[1])}月 ({mo})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Branch selection */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <Building className="w-3.5 h-3.5 text-indigo-500" />
+                    按特定分店：
+                  </label>
+                  <select
+                    value={adminDelBranch}
+                    onChange={e => setAdminDelBranch(e.target.value)}
+                    className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-xl focus:border-indigo-500 focus:outline-none font-bold text-slate-800"
+                  >
+                    <option value="all">-- 不限分店 (全部分店) --</option>
+                    {uniqueBranchesFromRecords.map(br => (
+                      <option key={br} value={br}>{br}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Product selection */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <Search className="w-3.5 h-3.5 text-indigo-500" />
+                    按特定产品：
+                  </label>
+                  <select
+                    value={adminDelProductCode}
+                    onChange={e => setAdminDelProductCode(e.target.value)}
+                    className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-xl focus:border-indigo-500 focus:outline-none font-bold text-slate-800"
+                  >
+                    <option value="all">-- 不限产品 (全部品类) --</option>
+                    {Array.from(new Set(salesRecords.map(r => `${r.productCode}|${r.productName}`))).sort().map((pStr: string) => {
+                      const [code, name] = pStr.split('|');
+                      return <option key={code} value={code}>{name} ({code})</option>;
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {/* Matching records readout */}
+              {(() => {
+                const matching = salesRecords.filter(item => {
+                  let match = true;
+                  if (adminDelMonth !== 'all' && item.month !== adminDelMonth) match = false;
+                  if (adminDelBranch !== 'all' && item.branchName !== adminDelBranch) match = false;
+                  if (adminDelProductCode !== 'all' && item.productCode !== adminDelProductCode) match = false;
+                  return match;
+                });
+
+                return (
+                  <div className="bg-slate-50 border border-slate-150 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="text-xs font-extrabold text-slate-800">过滤匹配状态预览：</div>
+                      <div className="text-[11px] text-slate-500">
+                        当前过滤条件在全库中匹配到共 
+                        <span className="text-xs font-black text-rose-600 font-mono mx-1">{matching.length}</span> 
+                        条销售流水记录。
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={matching.length === 0 || isBatchDeleting}
+                      onClick={async () => {
+                        if (adminDelMonth === 'all' && adminDelBranch === 'all' && adminDelProductCode === 'all') {
+                          alert('请指定至少一项过滤维度（月份、分店或产品），或使用右侧“一键安全格式化”功能。');
+                          return;
+                        }
+                        const msg = `⚠️ 警告：您即将批量清除符合以下筛选条件的销售业绩记录：\n` +
+                          `${adminDelMonth !== 'all' ? `• 月份: ${adminDelMonth}\n` : ''}` +
+                          `${adminDelBranch !== 'all' ? `• 分店: ${adminDelBranch}\n` : ''}` +
+                          `${adminDelProductCode !== 'all' ? `• 产品编码: ${adminDelProductCode}\n` : ''}` +
+                          `共涉及 ${matching.length} 条记录，确定执行删除吗？此操作无法撤销！`;
+                        
+                        if (!window.confirm(msg)) return;
+
+                        setIsBatchDeleting(true);
+                        try {
+                          const filter: any = {};
+                          if (adminDelMonth !== 'all') filter.month = adminDelMonth;
+                          if (adminDelBranch !== 'all') filter.branchName = adminDelBranch;
+                          if (adminDelProductCode !== 'all') filter.productCode = adminDelProductCode;
+
+                          const deletedCount = await DbService.deleteSalesRecordsByFilter(filter, {
+                            id: currentUser.id,
+                            name: currentUser.username,
+                            role: currentUser.role
+                          });
+
+                          triggerLocalToast(`🗑️ 成功按筛选维度批量删除了 ${deletedCount} 条销售记录流水！`, 'success');
+                          
+                          // reset filters
+                          setAdminDelMonth('all');
+                          setAdminDelBranch('all');
+                          setAdminDelProductCode('all');
+                        } catch (e) {
+                          console.error(e);
+                          alert('批量删除失败，请重试');
+                        } finally {
+                          setIsBatchDeleting(false);
+                        }
+                      }}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                    >
+                      {isBatchDeleting ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>批量清退中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>删除符合筛选的 {matching.length} 条流水</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Right Panel: Reset / Format data */}
+            <div className="bg-gradient-to-br from-slate-900 to-slate-950 rounded-3xl p-6 text-white shadow-sm md:col-span-4 flex flex-col justify-between space-y-6 font-sans">
+              <div className="space-y-4">
+                <div className="p-2.5 bg-rose-500/10 text-rose-400 rounded-2xl w-fit border border-rose-500/20">
+                  <RefreshCw className="w-6 h-6" />
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-sm font-black text-rose-300">一键清空案例数据</h3>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    当前智能大屏默认加载了系统的测试案例及样板业绩（如 2026-05 / 2025-06 等店销）。
+                  </p>
+                  <p className="text-[11px] text-rose-400 font-semibold leading-relaxed">
+                    点击下方按钮可彻底格式化并清空整个销售业绩数据库，以便行政开始录入/上传全新真实的往期实际财务业绩流水。
+                  </p>
+                </div>
+              </div>
+
+              {showClearAllConfirm ? (
+                <div className="bg-rose-950/40 border border-rose-800/60 rounded-2xl p-4 space-y-3">
+                  <div className="text-xs text-rose-200 font-bold flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    确定清空全部销售业绩？(共 {salesRecords.length} 条)
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isClearingAll}
+                      onClick={async () => {
+                        setIsClearingAll(true);
+                        try {
+                          await DbService.clearAllSalesRecords({
+                            id: currentUser.id,
+                            name: currentUser.username,
+                            role: currentUser.role
+                          });
+                          triggerLocalToast('🎉 销售数据库已成功初始化格式化！可以开始录入实际数据。', 'success');
+                          setShowClearAllConfirm(false);
+                        } catch (e) {
+                          console.error(e);
+                          alert('格式化清空失败');
+                        } finally {
+                          setIsClearingAll(false);
+                        }
+                      }}
+                      className="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-extrabold text-[10px] rounded-lg transition-colors cursor-pointer"
+                    >
+                      {isClearingAll ? '格式化中...' : '是的，立刻清空'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowClearAllConfirm(false)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px] rounded-lg transition-colors cursor-pointer"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowClearAllConfirm(true)}
+                  className="w-full py-2.5 bg-rose-600/25 hover:bg-rose-600/40 text-rose-400 hover:text-white border border-rose-500/20 hover:border-rose-500 font-extrabold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>🗑️ 彻底格式化全部销售流水</span>
+                </button>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+
+
+      {/* ========================================================
+          EDIT RECORD DIALOG (单条记录编辑校准对话框)
+          ======================================================== */}
+      {editingRecord && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[1000] p-4 text-left">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white w-full max-w-lg rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden"
+          >
+            {/* Heading */}
+            <div className="p-6 border-b border-slate-150 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <Sliders className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">校正单条销售业绩档案</h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">直接修改数据库单项销量及基本信息，并重新校对归档</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setEditingRecord(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-50 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content Fields */}
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+              {/* Branch name */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">分店名称：</label>
+                <select
+                  value={editingRecord.branchName}
+                  onChange={e => setEditingRecord({ ...editingRecord, branchName: e.target.value })}
+                  className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-xl focus:border-indigo-500 focus:outline-none font-bold text-slate-800"
+                >
+                  <option value="黄石店">黄石店</option>
+                  <option value="白云店">白云店</option>
+                  <option value="天河店">天河店</option>
+                  <option value="越秀店">越秀店</option>
+                  <option value="番禺店">番禺店</option>
+                  {/* Dynamic ones */}
+                  {uniqueBranchesFromRecords.filter(b => b !== '黄石店' && b !== '白云店' && b !== '天河店' && b !== '越秀店' && b !== '番禺店').map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Supplier */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">对接供应商：</label>
+                <input
+                  type="text"
+                  value={editingRecord.supplierName}
+                  onChange={e => setEditingRecord({ ...editingRecord, supplierName: e.target.value })}
+                  className="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold text-slate-850"
+                  placeholder="请输入供应商名称"
+                />
+              </div>
+
+              {/* Product Code & Product Name inline */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 font-mono">产品编码：</label>
+                  <input
+                    type="text"
+                    value={editingRecord.productCode}
+                    onChange={e => setEditingRecord({ ...editingRecord, productCode: e.target.value })}
+                    className="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none font-mono font-bold text-slate-850"
+                    placeholder="如 PROD-A01"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">商品名称：</label>
+                  <input
+                    type="text"
+                    value={editingRecord.productName}
+                    onChange={e => setEditingRecord({ ...editingRecord, productName: e.target.value })}
+                    className="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold text-slate-850"
+                    placeholder="请输入商品通用名称"
+                  />
+                </div>
+              </div>
+
+              {/* Specs */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">规格型号描述：</label>
+                <input
+                  type="text"
+                  value={editingRecord.specs}
+                  onChange={e => setEditingRecord({ ...editingRecord, specs: e.target.value })}
+                  className="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none text-slate-700"
+                  placeholder="如常规规格"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Quantity */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">销售数量 (件)：</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editingRecord.quantity}
+                    onChange={e => setEditingRecord({ ...editingRecord, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none font-mono font-bold text-indigo-700"
+                  />
+                </div>
+                {/* Month */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">所属销售月份：</label>
+                  <input
+                    type="text"
+                    placeholder="格式如 2026-05"
+                    value={editingRecord.month}
+                    onChange={e => setEditingRecord({ ...editingRecord, month: e.target.value })}
+                    className="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none font-mono font-bold text-slate-850"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="p-4 border-t border-slate-150 bg-slate-50 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setEditingRecord(null)}
+                className="px-4 py-2 border border-slate-200 hover:bg-white text-slate-600 rounded-xl text-xs cursor-pointer font-semibold"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={isSavingEdit}
+                onClick={async () => {
+                  if (!editingRecord.month || !/^\d{4}-\d{2}$/.test(editingRecord.month)) {
+                    alert('销售月份格式错误，必须为类似 YYYY-MM 格式，例如 2026-05');
+                    return;
+                  }
+                  setIsSavingEdit(true);
+                  try {
+                    await DbService.updateSalesRecord(editingRecord, {
+                      id: currentUser.id,
+                      name: currentUser.username,
+                      role: currentUser.role
+                    });
+                    triggerLocalToast('🎉 成功保存修改，数据已实时校准！', 'success');
+                    setEditingRecord(null);
+                  } catch (e) {
+                    console.error(e);
+                    alert('保存修改发生意外失败');
+                  } finally {
+                    setIsSavingEdit(false);
+                  }
+                }}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                {isSavingEdit ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>归档中...</span>
+                  </>
+                ) : (
+                  <span>确立修改并校准</span>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+
+      {/* ========================================================
           IMPORT MODAL COMPONENT (采购专用数据多渠道无缝导入控制台)
           ======================================================== */}
       {showImportModal && (
@@ -1734,32 +2244,59 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
             </div>
 
             {/* Modal Actions */}
-            <div className="p-4 border-t border-slate-150 bg-slate-50 rounded-b-3xl flex items-center justify-end gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowImportModal(false)}
-                className="px-4 py-2 border border-slate-200 hover:bg-white text-slate-600 rounded-xl text-xs cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={submitImportedData}
-                disabled={importPreview.length === 0 || isSubmittingImport}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                {isSubmittingImport ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>归档存入中...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>确立完成导入归档</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </>
-                )}
-              </button>
+            <div className="p-4 border-t border-slate-150 bg-slate-50 rounded-b-3xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
+              {importPreview.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-bold shrink-0">导入模式：</span>
+                  <div className="flex border border-slate-200 bg-white rounded-lg p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setImportMode('append')}
+                      className={`px-3 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
+                        importMode === 'append' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      追加数据 (保留已有)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImportMode('replace')}
+                      className={`px-3 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
+                        importMode === 'replace' ? 'bg-rose-50 text-rose-700' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      更新替换 (覆盖重合数据)
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center justify-end gap-3 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  className="px-4 py-2 border border-slate-200 hover:bg-white text-slate-600 rounded-xl text-xs cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={submitImportedData}
+                  disabled={importPreview.length === 0 || isSubmittingImport}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSubmittingImport ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>归档存入中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>确立完成导入归档</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
           </motion.div>

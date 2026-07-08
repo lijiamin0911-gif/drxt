@@ -2739,6 +2739,157 @@ export class ServerDbService {
     this.triggerChange();
   }
 
+  public static async deleteSalesRecord(id: string, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (isFirebaseConfigured && db) {
+      try {
+        await deleteDoc(doc(db, 'sales_records', id));
+      } catch (e) {
+        handleFirestoreError(e, OperationType.DELETE, `sales_records/${id}`);
+      }
+    } else {
+      const current = getLocalData<SalesRecord[]>('db_sales_records', []);
+      const updated = current.filter(r => r.id !== id);
+      setLocalData('db_sales_records', updated);
+    }
+
+    if (this.cachedSalesRecords) {
+      this.cachedSalesRecords = null; // force reload
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '删除单条销售数据',
+      `成功删除了单条分店销售业绩记录 (ID: ${id})`
+    );
+
+    this.triggerChange();
+  }
+
+  public static async updateSalesRecord(record: SalesRecord, operator: { id: string; name: string; role: string }): Promise<void> {
+    if (isFirebaseConfigured && db) {
+      try {
+        await setDoc(doc(db, 'sales_records', record.id), record);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.UPDATE, `sales_records/${record.id}`);
+      }
+    } else {
+      const current = getLocalData<SalesRecord[]>('db_sales_records', []);
+      const updated = current.map(r => r.id === record.id ? record : r);
+      setLocalData('db_sales_records', updated);
+    }
+
+    if (this.cachedSalesRecords) {
+      this.cachedSalesRecords = null; // force reload
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '修改分店销售数据',
+      `成功修改了销售业绩记录: [${record.branchName}] ${record.productName} 在 ${record.month} 销量为 ${record.quantity}件`
+    );
+
+    this.triggerChange();
+  }
+
+  public static async deleteSalesRecordsByFilter(
+    filter: { month?: string; branchName?: string; productCode?: string }, 
+    operator: { id: string; name: string; role: string }
+  ): Promise<number> {
+    let deletedCount = 0;
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'sales_records'));
+        for (const d of snap.docs) {
+          const item = d.data() as SalesRecord;
+          let match = true;
+          if (filter.month && item.month !== filter.month) match = false;
+          if (filter.branchName && item.branchName !== filter.branchName) match = false;
+          if (filter.productCode && item.productCode !== filter.productCode) match = false;
+          if (match) {
+            await deleteDoc(doc(db, 'sales_records', item.id));
+            deletedCount++;
+          }
+        }
+      } catch (e) {
+        handleFirestoreError(e, OperationType.DELETE, 'sales_records_by_filter');
+      }
+    } else {
+      const current = getLocalData<SalesRecord[]>('db_sales_records', []);
+      const filtered = current.filter(item => {
+        let match = true;
+        if (filter.month && item.month !== filter.month) match = false;
+        if (filter.branchName && item.branchName !== filter.branchName) match = false;
+        if (filter.productCode && item.productCode !== filter.productCode) match = false;
+        if (match) {
+          deletedCount++;
+          return false; // delete it
+        }
+        return true; // keep it
+      });
+      setLocalData('db_sales_records', filtered);
+    }
+
+    if (this.cachedSalesRecords) {
+      this.cachedSalesRecords = null; // force reload
+    }
+
+    let logMsg = '按条件选择性删除销售数据';
+    let logDetail = '删除了符合条件的销售记录。';
+    const parts: string[] = [];
+    if (filter.month) parts.push(`月份: ${filter.month}`);
+    if (filter.branchName) parts.push(`分店: ${filter.branchName}`);
+    if (filter.productCode) parts.push(`商品编码: ${filter.productCode}`);
+    if (parts.length > 0) {
+      logDetail = `清除了符合条件 [${parts.join(', ')}] 的销售记录共 ${deletedCount} 条`;
+    } else {
+      logDetail = `清除了全部销售记录共 ${deletedCount} 条`;
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      logMsg,
+      logDetail
+    );
+
+    this.triggerChange();
+    return deletedCount;
+  }
+
+  public static async clearAllSalesRecords(operator: { id: string; name: string; role: string }): Promise<void> {
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'sales_records'));
+        for (const d of snap.docs) {
+          await deleteDoc(doc(db, 'sales_records', d.id));
+        }
+      } catch (e) {
+        handleFirestoreError(e, OperationType.DELETE, 'sales_records_all');
+      }
+    } else {
+      setLocalData('db_sales_records', []);
+    }
+
+    if (this.cachedSalesRecords) {
+      this.cachedSalesRecords = null; // force reload
+    }
+
+    await this.log(
+      operator.id,
+      operator.name,
+      operator.role,
+      '清空所有分店销售数据',
+      '管理员执行了清空全部历史销售记录的操作，准备开始录入实际业务数据。'
+    );
+
+    this.triggerChange();
+  }
+
   public static async getBranchStocks(): Promise<BranchStock[]> {
     if (this.cachedBranchStocks) {
       return this.cachedBranchStocks;

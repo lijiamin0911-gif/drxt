@@ -319,6 +319,25 @@ export class DbService {
     return this.callServer('saveSalesRecords', [records, operator]);
   }
 
+  public static async deleteSalesRecord(id: string, operator: any): Promise<void> {
+    return this.callServer('deleteSalesRecord', [id, operator]);
+  }
+
+  public static async updateSalesRecord(record: SalesRecord, operator: any): Promise<void> {
+    return this.callServer('updateSalesRecord', [record, operator]);
+  }
+
+  public static async deleteSalesRecordsByFilter(
+    filter: { month?: string; branchName?: string; productCode?: string }, 
+    operator: any
+  ): Promise<number> {
+    return this.callServer('deleteSalesRecordsByFilter', [filter, operator]);
+  }
+
+  public static async clearAllSalesRecords(operator: any): Promise<void> {
+    return this.callServer('clearAllSalesRecords', [operator]);
+  }
+
   public static async getBranchStocks(): Promise<BranchStock[]> {
     return this.getWithCache('getBranchStocks', []);
   }
