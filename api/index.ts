@@ -1,5 +1,5 @@
 import express from 'express';
-import { ServerDbService } from '../dataLayer/serverDbService';
+import { ServerDbService } from '../dataLayer/serverDbService.js';
 
 const app = express();
 

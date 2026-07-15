@@ -109,16 +109,18 @@ class SupabaseDbClient implements DbClientInterface {
   private client: SupabaseClient | null = null;
 
   constructor() {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_KEY;
     const isConfigured = !!(
-      process.env.SUPABASE_URL &&
-      process.env.SUPABASE_KEY
+      supabaseUrl &&
+      supabaseKey
     );
 
     if (isConfigured) {
       console.log('🔌 Initializing Supabase client...');
       this.client = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_KEY
+        supabaseUrl,
+        supabaseKey
       );
     }
   }
@@ -208,7 +210,12 @@ class CombinedDbClient implements DbClientInterface {
   private activeClient: DbClientInterface | null = null;
 
   constructor() {
-    const useSupabase = process.env.USE_SUPABASE === 'true';
+    const hasSupabaseEnv = !!(
+      (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) &&
+      (process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_KEY)
+    );
+    // Enable Supabase if explicitly requested OR if supabase env vars are present (Vercel injects VITE_* vars)
+    const useSupabase = process.env.USE_SUPABASE === 'true' || (process.env.USE_SUPABASE !== 'false' && hasSupabaseEnv);
     const supabaseClient = new SupabaseDbClient();
     const pgClient = new PostgresClient();
 

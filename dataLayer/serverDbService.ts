@@ -11,8 +11,8 @@ const query = (() => {}) as any;
 const where = (() => {}) as any;
 const orderBy = (() => {}) as any;
 
-import { db, isFirebaseConfigured, disableFirebase } from '../src/lib/firebase';
-import { User, Order, PurchaseOrder, Arrival, SystemConfig, OperationLog, Role, InventoryItem, Product, Supplier, SalesRecord, BranchStock, IndependentPurchaseOrder, IndependentPurchaseOrderItem } from '../src/types';
+import { db, isFirebaseConfigured, disableFirebase } from '../src/lib/firebase.js';
+import { User, Order, PurchaseOrder, Arrival, SystemConfig, OperationLog, Role, InventoryItem, Product, Supplier, SalesRecord, BranchStock, IndependentPurchaseOrder, IndependentPurchaseOrderItem } from '../src/types.js';
 
 enum OperationType {
   CREATE = 'create',
@@ -238,7 +238,7 @@ export const SEED_SUPPLIERS: Supplier[] = [
 // Local DB State for server-side persistence in a JSON file
 import fs from 'fs';
 import path from 'path';
-import { dbClient } from './dbClient';
+import { dbClient } from './dbClient.js';
 
 const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
 
