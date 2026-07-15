@@ -17,10 +17,9 @@ import { User } from '../types';
 interface LoginModalProps {
   isOpen: boolean;
   onLogin: (u: string, p: string) => Promise<boolean> | boolean;
-  onResetUsers: () => void;
 }
 
-export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
+export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -135,10 +134,6 @@ export function LoginModal({ isOpen, onLogin, onResetUsers }: LoginModalProps) {
               )}
             </button>
           </form>
-
-
-
-
         </div>
       </div>
     </div>

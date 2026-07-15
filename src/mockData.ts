@@ -5,9 +5,7 @@
 
 import { Transaction, InventoryItem, User } from './types';
 
-export const DEFAULT_USERS: User[] = [
-  { username: 'admin', role: 'admin', region: '', password: '123' }
-];
+export const DEFAULT_USERS: User[] = [];
 
 export const DEFAULT_REGION_STORE_MAP: Record<string, string[]> = {
   '总部': ['总部总仓'],

@@ -102,7 +102,8 @@ export function InventoryTab({
     if (summaryDimension === 'product_details') {
       // Show fine granularity
       return processedInventory.map(item => ({
-        key: `${item.store}-${item.name}-${item.spec}`,
+        key: `${item.store}-${item.productCode || ''}-${item.name}-${item.spec}`,
+        productCode: item.productCode || '—',
         name: item.name,
         store: item.store,
         category: item.category,
@@ -176,12 +177,13 @@ export function InventoryTab({
 
   // 3. Independent Stock upload template generate and XLSX file downloader
   const handleDownloadTemplate = () => {
-    const headers = ['分店', '产品名称', '规格型号', '类别', '库存数量', '单价'];
+    const headers = ['分店', '产品编码', '产品名称', '规格型号', '类别', '库存数量', '单价'];
     const samples = [
-      ['黄石店', '智能吸顶灯', '圆形/40W', '灯具', 150, 84],
-      ['武汉店', '复古吸顶灯', '圆形/30W', '灯具', 110, 95],
-      ['北京店', '无线蓝牙耳机', 'Pro版', '电子产品', 250, 200],
-      ['广州店', '慢回弹记忆枕', '标准型', '家居用品', 140, 110]
+      ['总部总仓', 'L001', '智能吸顶灯', '圆形/40W', '灯具', 150, 84],
+      ['黄石店', 'L001', '智能吸顶灯', '圆形/40W', '灯具', 110, 84],
+      ['武汉店', 'L001', '智能吸顶灯', '圆形/40W', '灯具', 150, 84],
+      ['北京店', 'E001', '无线蓝牙耳机', 'Pro版', '电子产品', 250, 200],
+      ['广州店', 'H001', '慢回弹记忆枕', '标准型', '家居用品', 140, 110]
     ];
     const wsData = [headers, ...samples];
     const wb = XLSX.utils.book_new();
@@ -214,6 +216,7 @@ export function InventoryTab({
         const first = jsonData[0];
         const cols = Object.keys(first);
         const storeCol = cols.find(c => c.includes('分店') || c.toLowerCase().includes('store'));
+        const codeCol = cols.find(c => c.includes('产品编码') || c.includes('商品编码') || c.includes('编码') || c.toLowerCase().includes('code'));
         const nameCol = cols.find(c => c.includes('产品名称') || c.includes('名称') || c.toLowerCase().includes('name'));
         const specCol = cols.find(c => c.includes('规格') || c.includes('型号') || c.toLowerCase().includes('spec'));
         const catCol = cols.find(c => c.includes('类别') || c.toLowerCase().includes('cat'));
@@ -231,6 +234,7 @@ export function InventoryTab({
 
         jsonData.forEach(row => {
           const storeVal = String(row[storeCol] || '').trim();
+          const codeVal = String(codeCol ? row[codeCol] : '').trim();
           const nameVal = String(row[nameCol] || '').trim();
           const specVal = String(specCol ? row[specCol] : '').trim() || '—';
           const catVal = String(catCol ? row[catCol] : '').trim() || '未分类';
@@ -239,18 +243,23 @@ export function InventoryTab({
 
           if (!storeVal || !nameVal) return; // Skip empty rows
 
-          // MATCH logic: "根据 分店 + 产品名称 + 规格 + 类别 匹配"
-          // If match: update stock qty and unit price. If not match: append linked to store
-          const existIdx = newInventory.findIndex(item => 
-            item.store === storeVal &&
-            item.name === nameVal &&
-            item.spec === specVal &&
-            item.category === catVal
-          );
+          // MATCH logic: Use code + store if code is present. Otherwise fallback to store + name + spec + category
+          const existIdx = newInventory.findIndex(item => {
+            if (codeVal && item.productCode) {
+              return item.store === storeVal && item.productCode === codeVal;
+            }
+            return (
+              item.store === storeVal &&
+              item.name === nameVal &&
+              item.spec === specVal &&
+              item.category === catVal
+            );
+          });
 
           if (existIdx !== -1) {
             newInventory[existIdx] = {
               ...newInventory[existIdx],
+              productCode: codeVal || newInventory[existIdx].productCode || '',
               stock: qtyVal,
               price: priceVal
             };
@@ -258,6 +267,7 @@ export function InventoryTab({
           } else {
             newInventory.push({
               store: storeVal,
+              productCode: codeVal,
               name: nameVal,
               spec: specVal,
               category: catVal,
@@ -282,7 +292,7 @@ export function InventoryTab({
   const handleExportExcel = () => {
     let headers: string[] = [];
     if (summaryDimension === 'product_details') {
-      headers = ['产品名称', '分店', '类别', '规格/型号', '库存数量', '库存金额'];
+      headers = ['产品编码', '产品名称', '分店', '类别', '规格/型号', '库存数量', '库存金额'];
     } else if (summaryDimension === 'by_store') {
       headers = ['分店', '库存数量', '库存金额'];
     } else {
@@ -293,7 +303,7 @@ export function InventoryTab({
 
     gridRows.forEach((r: any) => {
       if (summaryDimension === 'product_details') {
-        sheetRows.push([r.name, r.store, r.category, r.spec, r.stock, r.stockAmount]);
+        sheetRows.push([r.productCode, r.name, r.store, r.category, r.spec, r.stock, r.stockAmount]);
       } else if (summaryDimension === 'by_store') {
         sheetRows.push([r.store, r.stock, r.stockAmount]);
       } else {
@@ -303,7 +313,7 @@ export function InventoryTab({
 
     // Add totals row
     if (summaryDimension === 'product_details') {
-      sheetRows.push(['合计', '—', '—', '—', totals.totalStock, totals.totalAmount]);
+      sheetRows.push(['合计', '—', '—', '—', '—', totals.totalStock, totals.totalAmount]);
     } else {
       sheetRows.push(['合计', totals.totalStock, totals.totalAmount]);
     }
@@ -537,6 +547,7 @@ export function InventoryTab({
             <thead className="bg-slate-100 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider">
               {summaryDimension === 'product_details' ? (
                 <tr>
+                  <th className="p-4 border-r border-slate-200">产品编码</th>
                   <th className="p-4 border-r border-slate-200">产品名称</th>
                   <th className="p-4 border-r border-slate-200">存储分店</th>
                   <th className="p-4 border-r border-slate-200">产品品类</th>
@@ -561,9 +572,9 @@ export function InventoryTab({
             <tbody className="divide-y divide-slate-100">
               {gridRows.length === 0 ? (
                 <tr>
-                  <td colSpan={summaryDimension === 'product_details' ? 6 : 3} className="p-12 text-center text-slate-400">
-                    <Boxes className="w-12 h-12 text-slate-200 mx-auto mb-3" />
-                    没有发现任何满足过滤条件的账面记录
+                  <td colSpan={summaryDimension === 'product_details' ? 7 : 3} className="p-12 text-center text-slate-400">
+                     <Boxes className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                     没有发现任何满足过滤条件的账面记录
                   </td>
                 </tr>
               ) : (
@@ -571,6 +582,7 @@ export function InventoryTab({
                   <tr key={row.key || row.store || row.category} className="hover:bg-slate-50/50 transition-colors">
                     {summaryDimension === 'product_details' ? (
                       <>
+                        <td className="p-4 font-mono text-slate-500 border-r border-slate-200">{row.productCode || '—'}</td>
                         <td className="p-4 font-semibold text-slate-800 border-r border-slate-200">{row.name}</td>
                         <td className="p-4 text-slate-500 border-r border-slate-200">{row.store}</td>
                         <td className="p-4 text-slate-500 border-r border-slate-200">{row.category}</td>
@@ -600,7 +612,7 @@ export function InventoryTab({
                 <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-200">
                   {summaryDimension === 'product_details' ? (
                     <>
-                      <td colSpan={4} className="p-4 border-r border-slate-200 text-right uppercase">账面合计</td>
+                      <td colSpan={5} className="p-4 border-r border-slate-200 text-right uppercase">账面合计</td>
                       <td className="p-4 text-right font-mono border-r border-slate-200">{totals.totalStock.toLocaleString()} 件</td>
                       <td className="p-4 text-right font-mono text-[#1a5c9e] text-sm font-extrabold bg-[#1a5c9e]/5">{formatCurrency(totals.totalAmount)}</td>
                     </>

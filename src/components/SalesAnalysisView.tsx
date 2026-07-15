@@ -22,7 +22,8 @@ import {
   Globe,
   Settings,
   Coins,
-  DollarSign
+  DollarSign,
+  Trash2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
@@ -36,7 +37,7 @@ import {
   Legend, 
   ResponsiveContainer 
 } from 'recharts';
-import { SalesRecord, User, Product, Supplier } from '../types';
+import { SalesRecord, User, Product, Supplier, InventoryItem } from '../types';
 import { DbService } from '../lib/dbService';
 
 interface SalesAnalysisViewProps {
@@ -48,6 +49,7 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
   const [salesRecords, setSalesRecords] = useState<SalesRecord[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
 
@@ -62,8 +64,18 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
     }
   }, [currentUser]);
 
-  // Active sub-tab inside page: 'overview' vs 'yoy' vs 'admin'
-  const [currentTab, setCurrentTab] = useState<'overview' | 'yoy' | 'admin'>('overview');
+  // Active sub-tab inside page: 'overview' vs 'yoy' vs 'pivot' vs 'admin'
+  const [currentTab, setCurrentTab] = useState<'overview' | 'yoy' | 'pivot' | 'admin'>('overview');
+
+  // Boss Pivot Board states
+  const [pivotBranch, setPivotBranch] = useState<string>(
+    currentUser.role === 'branch' ? (currentUser.branchName || '') : 'all'
+  );
+  const [pivotDimension, setPivotDimension] = useState<'category' | 'product_name' | 'spec'>('product_name');
+  const [pivotYear, setPivotYear] = useState<string>('2025');
+  const [pivotSelectedMonths, setPivotSelectedMonths] = useState<string[]>([
+    '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'
+  ]);
 
   // Admin Data Management states
   const [editingRecord, setEditingRecord] = useState<SalesRecord | null>(null);
@@ -90,14 +102,16 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [recs, prods, sups] = await Promise.all([
+      const [recs, prods, sups, invs] = await Promise.all([
         DbService.getSalesRecords(),
         DbService.getProducts(),
-        DbService.getSuppliers()
+        DbService.getSuppliers(),
+        DbService.getInventory()
       ]);
       setSalesRecords(recs);
       setProducts(prods);
       setSuppliers(sups);
+      setInventory(invs);
     } catch (e) {
       console.error('Failed to load Sales data:', e);
       triggerLocalToast('加载数据失败，请重试', 'error');
@@ -711,6 +725,185 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
   const latestYearStr = sortedYoySelectedYearsAsc.length > 0 ? sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 1] : '';
   const secondLatestYearStr = sortedYoySelectedYearsAsc.length > 1 ? sortedYoySelectedYearsAsc[sortedYoySelectedYearsAsc.length - 2] : '';
 
+  // --- BOSS MULTI-DIMENSIONAL PIVOT ENGINE ---
+  const pivotTableData = useMemo(() => {
+    // 1. Filter sales records for pivot
+    const filteredSales = salesRecords.filter(r => {
+      // Branch filter
+      if (pivotBranch !== 'all' && r.branchName !== pivotBranch) return false;
+      
+      // Time filter (Year & Selected Months)
+      const [yr, mo] = r.month.split('-');
+      if (yr !== pivotYear) return false;
+      if (!pivotSelectedMonths.includes(mo)) return false;
+      
+      return true;
+    });
+
+    // 2. Filter inventory items for pivot
+    const filteredInv = inventory.filter(item => {
+      // Branch filter
+      if (pivotBranch !== 'all') {
+        const itemStore = item.store || '';
+        return itemStore === pivotBranch;
+      }
+      return true;
+    });
+
+    // Heuristic category categorizer based on item name keywords
+    const getCategoryHeuristic = (prodName: string) => {
+      const name = prodName || '';
+      if (name.includes('灯') || name.includes('光') || name.includes('照明')) return '灯具';
+      if (name.includes('机') || name.includes('宝') || name.includes('线') || name.includes('支架') || name.includes('电') || name.includes('插')) return '电子产品';
+      if (name.includes('枕') || name.includes('壶') || name.includes('箱') || name.includes('杯') || name.includes('家具') || name.includes('枕')) return '家居用品';
+      return '灯具'; // default category
+    };
+
+    // 3. Map/Group data by selected dimension
+    const groupMap: Record<string, {
+      label: string;
+      salesQty: number;
+      salesAmount: number;
+      salesProfit: number;
+      stockQty: number;
+      stockAmount: number;
+    }> = {};
+
+    // Group sales records
+    filteredSales.forEach(r => {
+      let label = '未知';
+      if (pivotDimension === 'category') {
+        label = getCategoryHeuristic(r.productName);
+      } else if (pivotDimension === 'product_name') {
+        label = r.productName;
+      } else {
+        label = r.specs || '常规规格';
+      }
+      
+      const key = label.trim();
+      
+      const matchedProd = products.find(p => p.productCode === r.productCode);
+      const sellingPrice = matchedProd?.sellingPrice ?? 45;
+      const costPrice = matchedProd?.costPrice ?? (sellingPrice * 0.7);
+
+      const amount = r.quantity * sellingPrice;
+      const profit = r.quantity * (sellingPrice - costPrice);
+
+      if (!groupMap[key]) {
+        groupMap[key] = {
+          label: key,
+          salesQty: 0,
+          salesAmount: 0,
+          salesProfit: 0,
+          stockQty: 0,
+          stockAmount: 0
+        };
+      }
+      groupMap[key].salesQty += r.quantity;
+      groupMap[key].salesAmount += amount;
+      groupMap[key].salesProfit += profit;
+    });
+
+    // Group inventory records
+    filteredInv.forEach(item => {
+      let label = '未知';
+      const itemName = item.name || item.productName || '';
+      if (pivotDimension === 'category') {
+        label = item.category || getCategoryHeuristic(itemName);
+      } else if (pivotDimension === 'product_name') {
+        label = itemName;
+      } else {
+        label = item.spec || item.specs || '常规规格';
+      }
+
+      const key = label.trim();
+      const stockQty = item.stock || item.currentStock || 0;
+      const stockPrice = item.price || 0;
+      const stockValuation = stockQty * stockPrice;
+
+      if (!groupMap[key]) {
+        groupMap[key] = {
+          label: key,
+          salesQty: 0,
+          salesAmount: 0,
+          salesProfit: 0,
+          stockQty: 0,
+          stockAmount: 0
+        };
+      }
+      groupMap[key].stockQty += stockQty;
+      groupMap[key].stockAmount += stockValuation;
+    });
+
+    return Object.values(groupMap).sort((a, b) => b.salesAmount - a.salesAmount);
+  }, [salesRecords, inventory, pivotBranch, pivotDimension, pivotYear, pivotSelectedMonths, products]);
+
+  // Pivot totals
+  const pivotTotals = useMemo(() => {
+    let totalSalesQty = 0;
+    let totalSalesAmount = 0;
+    let totalSalesProfit = 0;
+    let totalStockQty = 0;
+    let totalStockAmount = 0;
+
+    pivotTableData.forEach(row => {
+      totalSalesQty += row.salesQty;
+      totalSalesAmount += row.salesAmount;
+      totalSalesProfit += row.salesProfit;
+      totalStockQty += row.stockQty;
+      totalStockAmount += row.stockAmount;
+    });
+
+    return {
+      totalSalesQty,
+      totalSalesAmount,
+      totalSalesProfit,
+      totalStockQty,
+      totalStockAmount
+    };
+  }, [pivotTableData]);
+
+  // Export pivot table to Excel XLSX
+  const handleExportPivotExcel = () => {
+    const dimLabel = pivotDimension === 'category' ? '品类类别' :
+                     pivotDimension === 'product_name' ? '产品名称' : '规格型号';
+
+    const headers = [
+      dimLabel,
+      '销售数量 (件)',
+      '销售总额 (元)',
+      '估算利润 (元)',
+      '库存数量 (件)',
+      '库存总值 (元)'
+    ];
+
+    const rows = pivotTableData.map(r => [
+      r.label,
+      r.salesQty,
+      r.salesAmount,
+      r.salesProfit,
+      r.stockQty,
+      r.stockAmount
+    ]);
+
+    // Append total row
+    rows.push([
+      '合计',
+      pivotTotals.totalSalesQty,
+      pivotTotals.totalSalesAmount,
+      pivotTotals.totalSalesProfit,
+      pivotTotals.totalStockQty,
+      pivotTotals.totalStockAmount
+    ]);
+
+    const wsData = [headers, ...rows];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, '经营决策透视表');
+    XLSX.writeFile(wb, `老板经营决策报表_${pivotBranch}_${pivotYear}年.xlsx`);
+    triggerLocalToast('📊 老板经营决策报表导出成功！', 'success');
+  };
+
 
   return (
     <div id="sales_analysis_container" className="space-y-6 font-sans relative">
@@ -771,6 +964,17 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
             <BarChart2 className="w-3.5 h-3.5 text-indigo-600" />
             <span>产品同比对比分析</span>
           </button>
+          {(currentUser.role === 'boss' || currentUser.role === 'admin' || currentUser.role === 'data_admin' || currentUser.role === 'purchasing') && (
+            <button
+              onClick={() => setCurrentTab('pivot')}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                currentTab === 'pivot' ? 'bg-white text-amber-700 shadow-sm border border-amber-200/50' : 'text-slate-500 hover:text-amber-600'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+              <span>老板多维经营决策看板</span>
+            </button>
+          )}
           {currentUser.role !== 'branch' && (
             <button
               onClick={() => setCurrentTab('admin')}
@@ -906,6 +1110,20 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
                   >
                     <Upload className="w-3.5 h-3.5" />
                     <span>采购导入数据</span>
+                  </button>
+                )}
+
+                {/* Clear/Manage database access limited to admin, boss, data_admin roles */}
+                {(currentUser.role === 'admin' || currentUser.role === 'boss' || currentUser.role === 'data_admin') && (
+                  <button
+                    onClick={() => {
+                      setCurrentTab('admin');
+                      triggerLocalToast('已自动切换至数据管理控制台。您可在下方选择指定维度删除，或点击右侧一键清空测试数据。', 'success');
+                    }}
+                    className="ml-2 px-3.5 py-1.5 text-xs bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 font-extrabold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer leading-none"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>清除/管理数据</span>
                   </button>
                 )}
               </div>
@@ -1644,6 +1862,291 @@ export default function SalesAnalysisView({ currentUser }: SalesAnalysisViewProp
             </div>
           )}
 
+        </div>
+      )}
+
+
+      {/* ========================================================
+          SUB-TAB 2.5: BOSS DECISION PIVOT (老板多维经营决策看板)
+          ======================================================== */}
+      {currentTab === 'pivot' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Top Quick Guide Banner */}
+          <div className="bg-gradient-to-r from-amber-50 to-amber-100/50 rounded-2xl border border-amber-200/60 p-4 flex items-start gap-3">
+            <span className="p-2 bg-amber-500 text-white rounded-xl shadow-sm">
+              <Sparkles className="w-5 h-5 animate-pulse" />
+            </span>
+            <div className="space-y-1">
+              <h3 className="text-sm font-extrabold text-amber-900">老板多维经营决策控制面板</h3>
+              <p className="text-xs text-amber-800/80 leading-relaxed">
+                本决策透视表专为管理者设计，能一屏完美对比<strong className="text-amber-950">「所选周期内的实际销售情况」</strong>与<strong className="text-amber-950">「当前该分店仓库的实时库存状况」</strong>。产品编码与品类在此深度融合，点击下方维度可无缝切换并支持一键下载高管报表。
+              </p>
+            </div>
+          </div>
+
+          {/* Pivot Filters Layout */}
+          <div className="bg-white rounded-2xl border border-slate-150 p-5 shadow-sm space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+              
+              {/* 1. Branch selection */}
+              <div className="md:col-span-4 space-y-1.5">
+                <label className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+                  <span className="w-1.5 h-3 bg-amber-500 rounded-full"></span>
+                  🏫 目标分析分店/货仓
+                </label>
+                {currentUser.role === 'branch' ? (
+                  <div className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800">
+                    {currentUser.branchName} (分店账号锁定)
+                  </div>
+                ) : (
+                  <select
+                    value={pivotBranch}
+                    onChange={(e) => setPivotBranch(e.target.value)}
+                    className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-xl focus:border-amber-500 focus:ring-2 focus:ring-amber-500/10 focus:outline-none font-bold text-slate-800"
+                  >
+                    <option value="all">📊 全部分店与总仓汇总</option>
+                    <option value="总部总仓">📦 总部总仓</option>
+                    {Array.from(new Set([
+                      ...salesRecords.map(r => r.branchName),
+                      ...inventory.map(item => item.store || '')
+                    ])).filter(name => name && name !== '总部总仓' && name !== '总仓').map(branchName => (
+                      <option key={branchName} value={branchName}>🏪 {branchName}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* 2. Group dimension selection */}
+              <div className="md:col-span-5 space-y-1.5">
+                <label className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+                  <span className="w-1.5 h-3 bg-amber-500 rounded-full"></span>
+                  📊 多维穿透汇总维度
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'category', label: '按品类类别' },
+                    { value: 'product_name', label: '按产品名称' },
+                    { value: 'spec', label: '按规格型号' }
+                  ].map(item => (
+                    <button
+                      key={item.value}
+                      onClick={() => setPivotDimension(item.value as any)}
+                      className={`py-2.5 text-xs font-bold rounded-xl border transition-all cursor-pointer text-center ${
+                        pivotDimension === item.value 
+                          ? 'bg-amber-500 text-white border-amber-500 shadow-sm' 
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Year selection */}
+              <div className="md:col-span-3 space-y-1.5">
+                <label className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+                  <span className="w-1.5 h-3 bg-amber-500 rounded-full"></span>
+                  📅 财务统计年度
+                </label>
+                <select
+                  value={pivotYear}
+                  onChange={(e) => setPivotYear(e.target.value)}
+                  className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-xl focus:border-amber-500 focus:ring-2 focus:ring-amber-500/10 focus:outline-none font-bold text-slate-800"
+                >
+                  {Array.from(new Set(salesRecords.map(r => r.month.split('-')[0]))).sort().map(year => (
+                    <option key={year} value={year}>{year} 年</option>
+                  ))}
+                  {!salesRecords.some(r => r.month.startsWith('2025')) && <option value="2025">2025 年</option>}
+                  {!salesRecords.some(r => r.month.startsWith('2026')) && <option value="2026">2026 年</option>}
+                </select>
+              </div>
+
+            </div>
+
+            {/* 4. Month granular selector */}
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <label className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+                  <span className="w-1.5 h-3 bg-amber-500 rounded-full"></span>
+                  📆 过滤统计月份 (支持单月、跨月多选组合分析)
+                </label>
+                
+                {/* Quick actions */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPivotSelectedMonths(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'])}
+                    className="text-[10px] font-extrabold text-amber-700 bg-amber-50 hover:bg-amber-100/80 px-2 py-1 rounded-lg border border-amber-200/50 transition-colors cursor-pointer"
+                  >
+                    选择 1-12月 (全年)
+                  </button>
+                  <button
+                    onClick={() => setPivotSelectedMonths(['01', '02', '03', '04', '05', '06'])}
+                    className="text-[10px] font-extrabold text-amber-700 bg-amber-50 hover:bg-amber-100/80 px-2 py-1 rounded-lg border border-amber-200/50 transition-colors cursor-pointer"
+                  >
+                    1-6月 (上半年)
+                  </button>
+                  <button
+                    onClick={() => setPivotSelectedMonths(['07', '08', '09', '10', '11', '12'])}
+                    className="text-[10px] font-extrabold text-amber-700 bg-amber-50 hover:bg-amber-100/80 px-2 py-1 rounded-lg border border-amber-200/50 transition-colors cursor-pointer"
+                  >
+                    7-12月 (下半年)
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: 12 }, (_, i) => {
+                  const num = i + 1;
+                  const valStr = num < 10 ? `0${num}` : `${num}`;
+                  const isSelected = pivotSelectedMonths.includes(valStr);
+                  
+                  return (
+                    <button
+                      key={valStr}
+                      onClick={() => {
+                        if (isSelected) {
+                          if (pivotSelectedMonths.length > 1) {
+                            setPivotSelectedMonths(pivotSelectedMonths.filter(m => m !== valStr));
+                          } else {
+                            triggerLocalToast('⚠️ 请至少保留选中一个月份进行数据统计', 'error');
+                          }
+                        } else {
+                          setPivotSelectedMonths([...pivotSelectedMonths, valStr].sort());
+                        }
+                      }}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                        isSelected 
+                          ? 'bg-amber-50 text-amber-900 border-amber-400 font-extrabold shadow-sm' 
+                          : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {num}月
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+
+          {/* Pivot Totals Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            
+            <div className="bg-white rounded-2xl border border-slate-150 p-4 shadow-sm space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">已售产品总量</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-black font-mono text-slate-900">{pivotTotals.totalSalesQty.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-400">件</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-150 p-4 shadow-sm space-y-1 border-l-4 border-l-emerald-500">
+              <span className="text-[10px] font-bold text-emerald-600 block uppercase tracking-wider">周期累计销售额</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-black font-mono text-emerald-700">¥{pivotTotals.totalSalesAmount.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-400">元</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-150 p-4 shadow-sm space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">仓库剩余库存数</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-black font-mono text-slate-900">{pivotTotals.totalStockQty.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-400">件</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-150 p-4 shadow-sm space-y-1 border-l-4 border-l-amber-500">
+              <span className="text-[10px] font-bold text-amber-600 block uppercase tracking-wider">库存总估值金额</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-black font-mono text-amber-700">¥{pivotTotals.totalStockAmount.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-400">元</span>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Pivot Table Display */}
+          <div className="bg-white rounded-2xl border border-slate-150 shadow-sm overflow-hidden">
+            <div className="p-4 bg-slate-50/50 border-b border-slate-150 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="space-y-0.5">
+                <h4 className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
+                  <Sliders className="w-4 h-4 text-amber-500" />
+                  多维穿透对比分析大板 ({pivotDimension === 'category' ? '品类' : pivotDimension === 'product_name' ? '产品' : '规格'})
+                </h4>
+                <p className="text-[10px] text-slate-400">已自动归档关联库存信息，实现销售与留存的完美呈现</p>
+              </div>
+
+              <button
+                onClick={handleExportPivotExcel}
+                className="self-start sm:self-center px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-sm hover:shadow transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>导出经营决策表 (Excel)</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                    <th className="p-3 text-center w-12">#</th>
+                    <th className="p-3">汇总维度名称 ({pivotDimension === 'category' ? '品类' : pivotDimension === 'product_name' ? '产品名称' : '规格型号'})</th>
+                    <th className="p-3 text-right">销售数量 (件)</th>
+                    <th className="p-3 text-right text-emerald-700">销售金额 (元)</th>
+                    <th className="p-3 text-right">仓库剩余数量 (件)</th>
+                    <th className="p-3 text-right text-amber-700">库存估值金额 (元)</th>
+                    <th className="p-3 text-right text-indigo-700">销售均价 (元)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs text-slate-705">
+                  {pivotTableData.map((row, index) => {
+                    const avgPrice = row.salesQty > 0 ? (row.salesAmount / row.salesQty) : 0;
+                    return (
+                      <tr key={row.label} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="p-3 text-center text-slate-400 font-mono font-bold">{index + 1}</td>
+                        <td className="p-3 font-extrabold text-slate-900">{row.label}</td>
+                        <td className="p-3 text-right font-bold font-mono text-slate-800">{row.salesQty.toLocaleString()}</td>
+                        <td className="p-3 text-right font-black font-mono text-emerald-700">¥{row.salesAmount.toLocaleString()}</td>
+                        <td className="p-3 text-right font-bold font-mono text-slate-800">
+                          {row.stockQty === 0 ? (
+                            <span className="text-slate-400">0</span>
+                          ) : (
+                            <span className="text-indigo-600">{row.stockQty.toLocaleString()}</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-black font-mono text-amber-700">¥{row.stockAmount.toLocaleString()}</td>
+                        <td className="p-3 text-right font-bold font-mono text-indigo-600">
+                          {avgPrice > 0 ? `¥${avgPrice.toFixed(2)}` : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {pivotTableData.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-12 text-center text-slate-400 italic bg-white">
+                        在选定的检索条件下，未查询到相关的销售条目或库存配置。请更换分店或统计月份重试。
+                      </td>
+                    </tr>
+                  )}
+
+                  {pivotTableData.length > 0 && (
+                    <tr className="bg-amber-50/20 font-black border-t-2 border-slate-200">
+                      <td className="p-3 text-center">∑</td>
+                      <td className="p-3 font-bold text-amber-900">合计</td>
+                      <td className="p-3 text-right font-mono text-slate-900">{pivotTotals.totalSalesQty.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono text-emerald-800">¥{pivotTotals.totalSalesAmount.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono text-indigo-900">{pivotTotals.totalStockQty.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono text-amber-800">¥{pivotTotals.totalStockAmount.toLocaleString()}</td>
+                      <td className="p-3 text-right text-slate-400">—</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

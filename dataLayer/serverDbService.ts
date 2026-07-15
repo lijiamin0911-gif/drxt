@@ -48,52 +48,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 // Seed Users List
-const SEED_USERS: User[] = [
-  {
-    id: 'u_admin',
-    username: 'admin',
-    role: 'admin',
-    isActive: true,
-    pin: '1111',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_vice_admin',
-    username: '副管理员',
-    role: 'admin',
-    isViceAdmin: true,
-    isActive: true,
-    pin: '1111',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_purchasing',
-    username: '采购员',
-    role: 'purchasing',
-    isActive: true,
-    pin: '1111',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_receptionist',
-    username: '前台验收员',
-    role: 'receptionist',
-    isActive: true,
-    pin: '1111',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'u_branch',
-    username: '黄石店店长',
-    role: 'branch',
-    branchName: '黄石店',
-    branchSalesEnabled: true,
-    branchStockEnabled: true,
-    isActive: true,
-    pin: '1111',
-    createdAt: new Date().toISOString()
-  }
-];
+const SEED_USERS: User[] = [];
 
 export const SEED_INVENTORY: InventoryItem[] = [
   {

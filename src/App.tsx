@@ -308,13 +308,6 @@ export default function App() {
     setRegionStoreMap(newMap);
   };
 
-  // Reset core user data action
-  const handleResetUserData = () => {
-    localStorage.setItem('salesUsers', JSON.stringify(DEFAULT_USERS));
-    setUsers(DEFAULT_USERS);
-    addToast('✅ 系统用户账号已重置，其余自定义账号已移除！密码还原为 123。', 'success');
-  };
-
   // ==========================================
   // Manager Restrictions & Dynamic Guards
   // ==========================================
@@ -924,24 +917,12 @@ export default function App() {
 
             {/* Quick Actions block */}
             <div className="flex items-center gap-2">
-              {currentUser.role === 'admin' ? (
+              {currentUser.role === 'admin' && (
                 <button
                   onClick={() => setIsUserMgmtOpen(true)}
                   className="px-2.5 py-1.5 text-xs font-semibold text-[#2563eb] bg-[#2563eb]/10 border border-[#2563eb]/20 hover:bg-[#2563eb]/15 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
                 >
                   <Users className="w-3.5 h-3.5" /> 用户管理
-                </button>
-              ) : (
-                <button
-                  onClick={() => {
-                    if (confirm('确定将系统数据完全重设吗？将恢复默认销售库。')) {
-                      handleResetUserData();
-                    }
-                  }}
-                  className="px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50 border border-slate-200 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
-                  title="重置测试账号"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" /> 重载
                 </button>
               )}
 
@@ -1218,7 +1199,6 @@ export default function App() {
       <LoginModal 
         isOpen={isLoginOpen} 
         onLogin={handleLogin}
-        onResetUsers={handleResetUserData}
       />
 
       <UserManagementModal 
