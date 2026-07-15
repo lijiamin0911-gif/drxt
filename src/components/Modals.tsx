@@ -17,11 +17,14 @@ import { User } from '../types';
 interface LoginModalProps {
   isOpen: boolean;
   onLogin: (u: string, p: string) => Promise<boolean> | boolean;
+  hasNoUsers: boolean;
+  onCreateFirstAdmin: (password: string) => Promise<boolean>;
 }
 
-export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
+export function LoginModal({ isOpen, onLogin, hasNoUsers, onCreateFirstAdmin }: LoginModalProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -30,25 +33,59 @@ export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setErrorMsg('请输入用户名和密码');
-      return;
-    }
-    
-    setIsValidating(true);
-    setErrorMsg('');
-    try {
-      const success = await onLogin(username.trim(), password.trim());
-      if (!success) {
-        setErrorMsg('用户名或密码错误');
-      } else {
-        setErrorMsg('');
+    if (hasNoUsers) {
+      if (!password.trim() || !confirmPassword.trim()) {
+        setErrorMsg('请输入密码并确认');
+        return;
       }
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg('登录发生错误，请稍后重试');
-    } finally {
-      setIsValidating(false);
+      if (password.length < 3) {
+        setErrorMsg('为了安全起见，密码长度请至少为3位');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setErrorMsg('两次输入的密码不一致');
+        return;
+      }
+
+      setIsValidating(true);
+      setErrorMsg('');
+      try {
+        const success = await onCreateFirstAdmin(password.trim());
+        if (success) {
+          const loginSuccess = await onLogin('admin', password.trim());
+          if (!loginSuccess) {
+            setErrorMsg('超级管理员账户已创建，但自动登录失败，请尝试在正常界面手动登录');
+          }
+        } else {
+          setErrorMsg('初始化超级管理员失败，请重试');
+        }
+      } catch (err: any) {
+        console.error(err);
+        setErrorMsg('连接服务器发生错误，请稍后重试');
+      } finally {
+        setIsValidating(false);
+      }
+    } else {
+      if (!username.trim() || !password.trim()) {
+        setErrorMsg('请输入用户名和密码');
+        return;
+      }
+      
+      setIsValidating(true);
+      setErrorMsg('');
+      try {
+        const success = await onLogin(username.trim(), password.trim());
+        if (!success) {
+          setErrorMsg('用户名或密码错误');
+        } else {
+          setErrorMsg('');
+        }
+      } catch (err: any) {
+        console.error(err);
+        setErrorMsg('登录发生错误，请稍后重试');
+      } finally {
+        setIsValidating(false);
+      }
     }
   };
 
@@ -64,49 +101,99 @@ export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
       >
         <div className="p-8">
           {/* Logo Brand Header */}
-          <div className="flex flex-col items-center justify-center mb-8 text-center">
+          <div className="flex flex-col items-center justify-center mb-6 text-center">
             <div className="w-12 h-12 bg-blue-50 text-[#2563eb] rounded-xl flex items-center justify-center mb-3 shadow-inner">
               <Shield className="w-6 h-6" />
             </div>
-            <h1 className="text-xl font-bold text-slate-800">分店订单协同管理系统</h1>
-            <p className="text-xs text-slate-400 mt-1">系统登录及多级权限控制</p>
+            <h1 className="text-xl font-bold text-slate-800">
+              {hasNoUsers ? "系统管理员密码设置" : "分店订单协同管理系统"}
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">
+              {hasNoUsers ? "首次使用：请为超级管理员 (admin) 设置一个新密码" : "系统登录及多级权限控制"}
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                用户名
-              </label>
-              <input 
-                type="text" 
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="请输入用户名" 
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all"
-              />
-            </div>
+            {hasNoUsers ? (
+              <>
+                <div className="bg-amber-50 border border-amber-200/60 rounded-xl p-3.5 text-xs text-amber-800 leading-relaxed">
+                  🔒 <strong>首次使用安全提示：</strong>
+                  <p className="mt-1">由于系统处于安全加固状态，没有内置任何默认或硬编码账户，您需要为超级管理员 <strong>admin</strong> 自定义设置一个主密码。请务必妥善记录和保存此密码！</p>
+                </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                密码
-              </label>
-              <div className="relative">
-                <input 
-                  type={showPass ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="请输入密码" 
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPass(!showPass)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    超级管理员密码
+                  </label>
+                  <div className="relative">
+                    <input 
+                      type={showPass ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="设置您的管理员密码" 
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPass(!showPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    确认新密码
+                  </label>
+                  <input 
+                    type={showPass ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="再次输入以确认" 
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    用户名
+                  </label>
+                  <input 
+                    type="text" 
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="请输入用户名" 
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    密码
+                  </label>
+                  <div className="relative">
+                    <input 
+                      type={showPass ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="请输入密码" 
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none text-slate-700 text-sm focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15 transition-all pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPass(!showPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
             {errorMsg && (
               <div className="text-red-600 text-xs font-medium bg-red-50 p-3 rounded-xl border border-red-200/50 flex items-center gap-2">
@@ -127,10 +214,10 @@ export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
               {isValidating ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  正在连接服务器...
+                  {hasNoUsers ? '正在初始化...' : '正在验证登录...'}
                 </>
               ) : (
-                '登 录'
+                hasNoUsers ? '初始化管理员并登录' : '登 录'
               )}
             </button>
           </form>

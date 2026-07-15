@@ -773,7 +773,25 @@ export class ServerDbService {
           dbData = { ...dbData, ...pgData };
           console.log('✅ [DB] Successfully loaded all collections from PostgreSQL/Supabase into memory.');
         } else {
-          console.log('ℹ️ [DB] PostgreSQL/Supabase DB is empty. No auto-seeding or overwriting of user account data is performed on startup as requested.');
+          console.log('ℹ️ [DB] PostgreSQL/Supabase DB is empty. Seeding non-credential master data (no login credentials seeded as requested).');
+          dbData['db_inventory'] = SEED_INVENTORY;
+          dbData['db_products'] = SEED_PRODUCTS;
+          dbData['db_suppliers'] = SEED_SUPPLIERS;
+          dbData['db_config'] = {
+            id: 'global',
+            shortageThreshold: 10,
+            updatedAt: new Date().toISOString(),
+            updatedBy: '系统'
+          };
+          dbData['db_users'] = []; // Strictly empty!
+          
+          await dbClient.set('db_inventory', SEED_INVENTORY);
+          await dbClient.set('db_products', SEED_PRODUCTS);
+          await dbClient.set('db_suppliers', SEED_SUPPLIERS);
+          await dbClient.set('db_config', dbData['db_config']);
+          await dbClient.set('db_users', []);
+          
+          await this.log('system', '系统', 'admin', '系统初始化', '初始化基础产品、库存与供应商主数据');
         }
         this.triggerChange();
         return; // Skip standard filesystem / Firebase initialization

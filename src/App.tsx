@@ -458,6 +458,29 @@ export default function App() {
     return false;
   };
 
+  const handleCreateFirstAdmin = async (password: string): Promise<boolean> => {
+    const adminUser: User = {
+      id: 'u_admin',
+      username: 'admin',
+      role: 'admin',
+      isActive: true,
+      pin: password.trim(),
+      password: password.trim(),
+      createdAt: new Date().toISOString()
+    };
+    try {
+      await DbService.saveUser(adminUser, { id: 'system', name: '系统自注册', role: 'admin' });
+      const updatedUsers = [adminUser];
+      setErpUsers(updatedUsers);
+      syncUsersList(updatedUsers);
+      return true;
+    } catch (e) {
+      console.error("Failed to create first admin account:", e);
+      addToast("❌ 初始化超级管理员账户失败，请检查网络或后台服务", "error");
+      return false;
+    }
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem('salesCurrentUser');
     setCurrentUser(null);
@@ -1199,6 +1222,8 @@ export default function App() {
       <LoginModal 
         isOpen={isLoginOpen} 
         onLogin={handleLogin}
+        hasNoUsers={erpUsers.length === 0 && users.length === 0}
+        onCreateFirstAdmin={handleCreateFirstAdmin}
       />
 
       <UserManagementModal 
