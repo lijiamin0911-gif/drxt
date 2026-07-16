@@ -1,0 +1,18 @@
+﻿node.exe : Vercel CLI 54.17.3 (Node.js 24.18.0)
+所在位置 C:\Users\86180\AppData\Roaming\npm\vercel.ps1:24 字符: 5
++     & "node$exe"  "$basedir/node_modules/vercel/dist/vc.js" $args
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Vercel CLI 54.17.3 (Node.js 24.18.0):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Fetching deployment "drxt-n7qzrxkz0-lijiamin0911-3682s-projects.vercel.app" in lijiamin0911-3682s-projects
+2026-07-16T08:30:31.225Z  Running build in Washington, D.C., USA (East) – iad1
+2026-07-16T08:30:31.226Z  Build machine configuration: 2 cores, 8 GB
+2026-07-16T08:30:31.232Z  Retrieving list of deployment files...
+2026-07-16T08:30:31.256Z  Skipping build cache, deployment was triggered without cache.
+2026-07-16T08:30:31.562Z  Downloading 27 deployment files...
+2026-07-16T08:30:33.147Z  Running "vercel build"
+2026-07-16T08:30:33.179Z  Vercel CLI 56.2.0
+2026-07-16T08:30:34.162Z  sh: line 1: vite: command not found
+2026-07-16T08:30:34.169Z  Error: Command "vite build" exited with 127
+status	● Error

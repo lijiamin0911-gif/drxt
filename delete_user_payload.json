@@ -1,0 +1,1 @@
+{"method":"deleteUser","args":["u_test","测试持久化",{"id":"u_admin","name":"admin","role":"admin"}]}

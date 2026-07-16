@@ -1,0 +1,1 @@
+{"method":"saveUser","args":[{"id":"u_test","username":"测试持久化","role":"admin","isActive":true,"pin":"2222","createdAt":"2026-07-16T00:00:00.000Z"},{"id":"u_admin","name":"admin","role":"admin"}]}

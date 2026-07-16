@@ -1,101 +1,78 @@
-import express from "express";
-import path from "path";
-import fs from "fs";
-import { ServerDbService } from "./dataLayer/serverDbService";
+﻿import express from 'express';
+import { ServerDbService } from './dataLayer/serverDbService.js';
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
 
-  // Enable JSON request body parsing with size threshold for bulk operations
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Initialize DB on cold start
+ServerDbService.initialize().catch((err) => {
+  console.error("鉂?ServerDbService init failed:", err);
+});
 
-  // Unified database action router
-  app.post("/api/db", async (req, res) => {
-    const { method, args } = req.body;
-    try {
-      if (!method) {
-        return res.status(400).json({ error: "Method parameter is required" });
-      }
-      const val = await ServerDbService.handleApiRequest(method, args || []);
-      res.json(val !== undefined ? val : null);
-    } catch (error: any) {
-      console.error(`Error executing ServerDbService.${method}:`, error);
-      res.status(500).json({ error: error.message || "Internal Server Error" });
-    }
-  });
-
-  // Multi-terminal instant synchronization version endpoint
-  app.get("/api/db/version", (req, res) => {
-    try {
-      res.json({ lastModified: ServerDbService.getLastModified() });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Internal Server Error" });
-    }
-  });
-
-  // Database connection status diagnostic endpoint
-  app.get("/api/db/status", (req, res) => {
-    try {
-      const isSupabase = process.env.USE_SUPABASE === 'true';
-      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_KEY);
-      const hasPgEnv = !!(process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD);
-      
-      let activeClient = "本地文件 (db.json)";
-      if (isSupabase && hasSupabaseEnv) {
-        activeClient = "Supabase 线上数据库";
-      } else if (hasPgEnv) {
-        activeClient = "腾讯云 PostgreSQL";
-      }
-
-      res.json({
-        supabaseEnabled: isSupabase,
-        supabaseConfigured: hasSupabaseEnv,
-        pgConfigured: hasPgEnv,
-        activeClient
-      });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Internal Server Error" });
-    }
-  });
-
-  // Health check endpoint
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", lastModified: ServerDbService.getLastModified() });
-  });
-
-  // Auto-detect production mode based on environment variable
-  const isProd = process.env.NODE_ENV === "production";
-
-  // Vite middleware for development vs static serve for production
-  if (!isProd) {
-    console.log("🛠️  Running in DEVELOPMENT mode: Vite hot-reload & transpilation enabled.");
-    try {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
-    } catch (e) {
-      console.error("Failed to load Vite dev middleware. If you wanted to run in production, run 'npm run build' first.", e);
-      process.exit(1);
-    }
-  } else {
-    console.log("📦 Running in PRODUCTION mode: Serving optimized, pre-compiled static files.");
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+// CORS
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
   }
+  next();
+});
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 ERP Full-Stack Server running on port ${PORT}`);
-    console.log(`   - Environment: ${isProd ? "PRODUCTION" : "DEVELOPMENT"}`);
-    console.log(`   - API Endpoint: http://localhost:${PORT}/api/db`);
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+// DB status
+app.get("/api/db/status", async (_req, res) => {
+  const isSupabase = !!(process.env.USE_SUPABASE === "true" || process.env.VITE_SUPABASE_URL);
+  res.json({ activeClient: isSupabase ? "Supabase" : "local", supabaseEnabled: isSupabase });
+});
+
+app.get("/api/db/version", async (_req, res) => {
+  res.json({ lastModified: ServerDbService.getLastModified() });
+});
+
+app.get("/api/health", async (_req, res) => {
+  res.json({ status: "ok", lastModified: ServerDbService.getLastModified() });
+});
+
+// Debug: echo request info
+app.get("/api/db/debug", async (req, res) => {
+  res.json({
+    env: { vite_url: process.env.VITE_SUPABASE_URL?.substring(0,20), vite_key: !!process.env.VITE_SUPABASE_KEY, use_supabase: process.env.USE_SUPABASE },
+    headers: req.headers,
+    method: req.method
   });
-}
+});
 
-startServer();
+// Debug: test POST body parsing
+app.post("/api/db/debug", async (req, res) => {
+  res.json({
+    bodyReceived: !!req.body,
+    bodyType: typeof req.body,
+    bodyKeys: req.body ? Object.keys(req.body) : [],
+    hasBody: !!req.body,
+    method: req.method
+  });
+});
+
+// Unified DB API router
+app.post("/api/db", async (req, res) => {
+  try {
+    const { method, args } = req.body as { method?: string; args?: any[] };
+    if (!method) {
+      res.status(400).json({ error: "Missing method parameter" });
+      return;
+    }
+    const result = await ServerDbService.handleApiRequest(method, args || []);
+    res.json(result);
+  } catch (e: any) {
+    console.error("API error:", e);
+    res.status(500).json({ error: e.message || "Internal Server Error" });
+  }
+});
+
+export default app;
+

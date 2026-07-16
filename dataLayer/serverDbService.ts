@@ -47,8 +47,53 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Seed Users List
-const SEED_USERS: User[] = [];
+// Seed Users List (default accounts; pin 1111 for all)
+const SEED_USERS: User[] = [
+  {
+    id: 'u_admin',
+    username: 'admin',
+    role: 'admin',
+    isActive: true,
+    pin: '1111',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'u_vice_admin',
+    username: '副管理员',
+    role: 'admin',
+    isViceAdmin: true,
+    isActive: true,
+    pin: '1111',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'u_purchasing',
+    username: '采购员',
+    role: 'purchasing',
+    isActive: true,
+    pin: '1111',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'u_receptionist',
+    username: '前台验收员',
+    role: 'receptionist',
+    isActive: true,
+    pin: '1111',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'u_branch',
+    username: '黄石店店长',
+    role: 'branch',
+    branchName: '黄石店',
+    branchSalesEnabled: true,
+    branchStockEnabled: true,
+    isActive: true,
+    pin: '1111',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  }
+];
 
 export const SEED_INVENTORY: InventoryItem[] = [
   {
@@ -238,13 +283,19 @@ export const SEED_SUPPLIERS: Supplier[] = [
 // Local DB State for server-side persistence in a JSON file
 import fs from 'fs';
 import path from 'path';
-import { dbClient } from './dbClient.js';
+import { dbClient } from '../src/lib/dbClient.js';
 
-const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(path.dirname(DB_FILE))) {
-  fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+// Local DB state path — use /tmp/data on Vercel serverless (cwd is read-only)
+// Use /tmp/data (writable in Vercel serverless) instead of cwd/data (read-only on /var/task)
+const DATA_DIR = process.env.VERCEL ? '/tmp/data' : path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DATA_DIR, 'db.json');
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (e: any) {
+  // Vercel /var/task may be read-only; continue anyway for Supabase mode
+  console.warn('⚠️ Could not create data directory:', e.message);
 }
 
 interface JsonDatabase {
@@ -783,6 +834,13 @@ export class ServerDbService {
         if (Object.keys(pgData).length > 0) {
           dbData = { ...dbData, ...pgData };
           console.log('✅ [DB] Successfully loaded all collections from PostgreSQL/Supabase into memory.');
+          // Self-heal: if db_users came back empty, seed default accounts so login works
+          const loadedUsers = (dbData as any)['db_users'] as any[] | undefined;
+          if (!loadedUsers || loadedUsers.length === 0) {
+            console.log('ℹ️ [DB] db_users empty in remote store, seeding default users...');
+            (dbData as any)['db_users'] = SEED_USERS;
+            await dbClient.set('db_users', SEED_USERS);
+          }
         } else {
           console.log('ℹ️ [DB] PostgreSQL/Supabase DB is empty. Seeding and migrating local collections to Cloud Relational Database...');
           
