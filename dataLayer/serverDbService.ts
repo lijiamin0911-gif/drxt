@@ -283,7 +283,7 @@ export const SEED_SUPPLIERS: Supplier[] = [
 // Local DB State for server-side persistence in a JSON file
 import fs from 'fs';
 import path from 'path';
-import { dbClient } from '../src/lib/dbClient.js';
+import { dbClient } from './dbClient.js';
 
 // Local DB state path — use /tmp/data on Vercel serverless (cwd is read-only)
 // Use /tmp/data (writable in Vercel serverless) instead of cwd/data (read-only on /var/task)

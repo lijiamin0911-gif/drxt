@@ -1,0 +1,8 @@
+﻿git : fatal: unable to access 'https://github.com/lijiamin0911-gif/drxt.git/': Failed to connect to github.com port 443
+ after 21083 ms: Could not connect to server
+所在位置 行:4 字符: 1
++ git push origin main 2>&1 | Out-File -FilePath D:\drxt_repo\push_log5 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: unable t...nnect to server:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

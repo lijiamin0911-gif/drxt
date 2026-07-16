@@ -1,0 +1,8 @@
+﻿git : To https://github.com/lijiamin0911-gif/drxt.git
+所在位置 行:6 字符: 1
++ git push origin main 2>&1 | Out-File -FilePath D:\drxt_repo\push_log6 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To https://gith...11-gif/drxt.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   a890014..24d4cbc  main -> main

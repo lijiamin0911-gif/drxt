@@ -1,0 +1,7 @@
+﻿git : fatal: unable to access 'https://github.com/lijiamin0911-gif/drxt.git/': Empty reply from server
+所在位置 行:6 字符: 1
++ git push origin main 2>&1 | Out-File -FilePath D:\drxt_repo\push_log4 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: unable t...ply from server:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

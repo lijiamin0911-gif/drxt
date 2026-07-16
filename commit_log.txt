@@ -1,0 +1,11 @@
+﻿[main 24d4cbc] revert: simplify vercel.json (use Vercel default build) + revert package.json build
+ 11 files changed, 126 insertions(+), 34 deletions(-)
+ create mode 100644 full_inspect.txt
+ create mode 100644 inspect3.txt
+ create mode 100644 inspect3_full.txt
+ create mode 100644 logs3.txt
+ create mode 100644 logs4.txt
+ create mode 100644 push_log.txt
+ create mode 100644 push_log2.txt
+ create mode 100644 push_log3.txt
+ create mode 100644 rebase_log.txt
