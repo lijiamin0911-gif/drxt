@@ -98,4 +98,22 @@ app.get("/api/debug/env", (req, res) => {
   });
 });
 
+// Debug Supabase write test endpoint
+app.get("/api/debug/test-write", async (req, res) => {
+  try {
+    const { dbClient } = await import('../dataLayer/dbClient.js');
+    const isEnabled = dbClient.isEnabled();
+    if (!isEnabled) {
+      res.json({ isEnabled, message: 'dbClient not enabled' });
+      return;
+    }
+    await dbClient.init();
+    await dbClient.set('__test_key__', { timestamp: Date.now(), message: 'debug write test' });
+    const allData = await dbClient.getAll();
+    res.json({ isEnabled, testKeyExists: !!allData['__test_key__'], testValue: allData['__test_key__'] });
+  } catch (err: any) {
+    res.json({ error: err.message });
+  }
+});
+
 export default app;
