@@ -349,10 +349,21 @@ loadDb();
 
 const getLocalData = <T>(key: string, defaultValue: T): T => {
   const val = (dbData as any)[key];
-  if (val === undefined) {
+  if (val === undefined || val === null) {
+    (dbData as any)[key] = defaultValue;
+    modifiedKeys.add(key);
+    saveDb();
     return defaultValue;
   }
-  return val;
+  // Type protection: If defaultValue is an array, but val is not, reset it to empty array
+  if (Array.isArray(defaultValue) && !Array.isArray(val)) {
+    console.warn(`⚠️ [DB Type Protection] Expected array for key "${key}", but got type "${typeof val}". Resetting to default value.`);
+    (dbData as any)[key] = defaultValue;
+    modifiedKeys.add(key);
+    saveDb();
+    return defaultValue;
+  }
+  return val as T;
 };
 
 const setLocalData = <T>(key: string, data: T) => {
@@ -773,25 +784,42 @@ export class ServerDbService {
           dbData = { ...dbData, ...pgData };
           console.log('✅ [DB] Successfully loaded all collections from PostgreSQL/Supabase into memory.');
         } else {
-          console.log('ℹ️ [DB] PostgreSQL/Supabase DB is empty. Seeding non-credential master data (no login credentials seeded as requested).');
-          dbData['db_inventory'] = SEED_INVENTORY;
-          dbData['db_products'] = SEED_PRODUCTS;
-          dbData['db_suppliers'] = SEED_SUPPLIERS;
-          dbData['db_config'] = {
-            id: 'global',
-            shortageThreshold: 10,
-            updatedAt: new Date().toISOString(),
-            updatedBy: '系统'
-          };
-          dbData['db_users'] = []; // Strictly empty!
+          console.log('ℹ️ [DB] PostgreSQL/Supabase DB is empty. Seeding and migrating local collections to Cloud Relational Database...');
           
-          await dbClient.set('db_inventory', SEED_INVENTORY);
-          await dbClient.set('db_products', SEED_PRODUCTS);
-          await dbClient.set('db_suppliers', SEED_SUPPLIERS);
+          // Seeding default datasets only if they do not exist locally
+          if (!dbData['db_inventory'] || dbData['db_inventory'].length === 0) {
+            dbData['db_inventory'] = SEED_INVENTORY;
+          }
+          if (!dbData['db_products'] || dbData['db_products'].length === 0) {
+            dbData['db_products'] = SEED_PRODUCTS;
+          }
+          if (!dbData['db_suppliers'] || dbData['db_suppliers'].length === 0) {
+            dbData['db_suppliers'] = SEED_SUPPLIERS;
+          }
+          if (!dbData['db_config']) {
+            dbData['db_config'] = {
+              id: 'global',
+              shortageThreshold: 10,
+              updatedAt: new Date().toISOString(),
+              updatedBy: '系统'
+            };
+          }
+          
+          // Safety: Do not overwrite existing local accounts. Only set to empty if absolutely nothing exists locally either.
+          if (!dbData['db_users']) {
+            dbData['db_users'] = [];
+          } else if (dbData['db_users'].length > 0) {
+            console.log(`📦 [DB Sync] Migrating ${dbData['db_users'].length} existing user accounts to empty PostgreSQL/Supabase Cloud database.`);
+          }
+
+          // Force-sync local data back to empty Cloud DB so they are never lost
+          await dbClient.set('db_inventory', dbData['db_inventory']);
+          await dbClient.set('db_products', dbData['db_products']);
+          await dbClient.set('db_suppliers', dbData['db_suppliers']);
           await dbClient.set('db_config', dbData['db_config']);
-          await dbClient.set('db_users', []);
+          await dbClient.set('db_users', dbData['db_users']);
           
-          await this.log('system', '系统', 'admin', '系统初始化', '初始化基础产品、库存与供应商主数据');
+          await this.log('system', '系统', 'admin', '系统初始化', '初始化并同步本地历史数据至云端关系型数据库');
         }
         this.triggerChange();
         return; // Skip standard filesystem / Firebase initialization
