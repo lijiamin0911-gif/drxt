@@ -53,8 +53,8 @@ app.get("/api/db/version", (req, res) => {
 // Database connection status diagnostic endpoint
 app.get("/api/db/status", (req, res) => {
   try {
-    const isSupabase = process.env.USE_SUPABASE === 'true';
-    const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_KEY);
+    const isSupabase = process.env.USE_SUPABASE === 'true' || !!(process.env.VITE_SUPABASE_URL);
+    const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_KEY) || !!(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_KEY);
     const hasPgEnv = !!(process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD);
     
     let activeClient = "本地文件 (db.json)";
@@ -78,6 +78,24 @@ app.get("/api/db/status", (req, res) => {
 // Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", lastModified: ServerDbService.getLastModified() });
+});
+
+// Debug env endpoint
+app.get("/api/debug/env", (req, res) => {
+  const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_KEY);
+  const hasViteSupabaseEnv = !!(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_KEY);
+  const hasUseSupabase = process.env.USE_SUPABASE;
+  const hasUseSupabaseDirect = process.env.VITE_USE_SUPABASE_DIRECT;
+  res.json({
+    hasSupabaseEnv,
+    hasViteSupabaseEnv,
+    hasUseSupabase,
+    hasUseSupabaseDirect,
+    supabaseUrl: process.env.VITE_SUPABASE_URL ? process.env.VITE_SUPABASE_URL.substring(0, 30) : null,
+    supabaseKeyPrefix: process.env.VITE_SUPABASE_KEY ? process.env.VITE_SUPABASE_KEY.substring(0, 10) : null,
+    supabaseUrl2: hasSupabaseEnv ? process.env.SUPABASE_URL?.substring(0, 30) : null,
+    supabaseKey2Prefix: hasSupabaseEnv ? process.env.SUPABASE_KEY?.substring(0, 10) : null,
+  });
 });
 
 export default app;
