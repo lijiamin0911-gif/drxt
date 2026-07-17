@@ -1,9 +1,0 @@
-﻿node.exe : Vercel CLI 54.17.3 (Node.js 24.18.0)
-所在位置 C:\Users\86180\AppData\Roaming\npm\vercel.ps1:24 字符: 5
-+     & "node$exe"  "$basedir/node_modules/vercel/dist/vc.js" $args
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (Vercel CLI 54.17.3 (Node.js 24.18.0):String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-Fetching deployment "drxt-mpf3lo4mq-lijiamin0911-3682s-projects.vercel.app" in lijiamin0911-3682s-projects
-status	● Error

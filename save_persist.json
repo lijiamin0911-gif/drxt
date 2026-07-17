@@ -1,1 +1,0 @@
-{"method":"saveUser","args":[{"id":"u_persist_test","username":"持久化测试","role":"admin","isActive":true,"pin":"9999","createdAt":"2026-07-16T10:00:00.000Z"},{"id":"u_admin","name":"admin","role":"admin"}]}
