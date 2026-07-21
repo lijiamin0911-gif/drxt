@@ -505,7 +505,7 @@ interface ChangePwdModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User | null;
-  onConfirmChange: (oldPass: string, newPass: string) => boolean;
+  onConfirmChange: (oldPass: string, newPass: string) => boolean | Promise<boolean>;
 }
 
 export function ChangePwdModal({ isOpen, onClose, currentUser, onConfirmChange }: ChangePwdModalProps) {
@@ -516,7 +516,7 @@ export function ChangePwdModal({ isOpen, onClose, currentUser, onConfirmChange }
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldPass || !newPass || !confirmNew) {
       setErrorMsg('请填写所有输入框');
@@ -531,15 +531,20 @@ export function ChangePwdModal({ isOpen, onClose, currentUser, onConfirmChange }
       return;
     }
 
-    const ok = onConfirmChange(oldPass, newPass);
-    if (ok) {
-      setErrorMsg('');
-      setOldPass('');
-      setNewPass('');
-      setConfirmNew('');
-      onClose();
-    } else {
-      setErrorMsg('当前旧密码验证失败，请重新输入');
+    try {
+      const ok = await onConfirmChange(oldPass, newPass);
+      if (ok) {
+        setErrorMsg('');
+        setOldPass('');
+        setNewPass('');
+        setConfirmNew('');
+        onClose();
+      } else {
+        setErrorMsg('当前旧密码验证失败，请重新输入');
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg('连接云端服务失败，请稍后重试');
     }
   };
 

@@ -152,6 +152,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       username: editUsername.trim(),
       role: editRole,
       pin: editPin.trim(),
+      password: editPin.trim(),
     };
 
     if (editRole === 'branch') {
@@ -188,6 +189,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       const updatedUser: User = {
         ...user,
         pin: newPin.trim(),
+        password: newPin.trim(),
       };
       await onSaveUser(updatedUser);
       alert(`🎉 账户 [${user.username}] 的登录密码已成功重置为：${newPin}！此修改已无缝同步至云端。`);
@@ -239,6 +241,7 @@ export default function UserManagementView({ users, onSaveUser, onDeleteUser, cu
       username: username.trim(),
       role,
       pin: pin.trim(),
+      password: pin.trim(),
       isActive: true,
       createdAt: new Date().toISOString()
     };

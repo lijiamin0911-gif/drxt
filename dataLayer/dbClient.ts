@@ -190,7 +190,7 @@ class SupabaseDbClient implements DbClientInterface {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs = 4000, errorMsg = 'Database operation timed out'): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs = 15000, errorMsg = 'Database operation timed out'): Promise<T> {
   let timer: NodeJS.Timeout;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(errorMsg)), timeoutMs);
@@ -229,20 +229,20 @@ class CombinedDbClient implements DbClientInterface {
 
   public async init(): Promise<void> {
     if (this.activeClient) {
-      await withTimeout(this.activeClient.init(), 4000, 'Database connection init timed out (4s Limit)');
+      await withTimeout(this.activeClient.init(), 15000, 'Database connection init timed out (15s Limit)');
     }
   }
 
   public async getAll(): Promise<Record<string, any>> {
     if (this.activeClient) {
-      return await withTimeout(this.activeClient.getAll(), 4000, 'Database read getAll timed out (4s Limit)');
+      return await withTimeout(this.activeClient.getAll(), 15000, 'Database read getAll timed out (15s Limit)');
     }
     return {};
   }
 
   public async set(key: string, value: any): Promise<void> {
     if (this.activeClient) {
-      await withTimeout(this.activeClient.set(key, value), 4000, `Database write set("${key}") timed out (4s Limit)`);
+      await withTimeout(this.activeClient.set(key, value), 15000, `Database write set("${key}") timed out (15s Limit)`);
     }
   }
 }

@@ -191,6 +191,12 @@ export default function App() {
       setErpSystemConfig(cfg);
       setErpUsers(usr);
       setErpProducts(prods);
+
+      // Keep local state and localStorage backup perfectly in sync with Database users
+      if (usr && usr.length > 0) {
+        setUsers(usr);
+        localStorage.setItem('salesUsers', JSON.stringify(usr));
+      }
     } catch (e) {
       console.error("Error loading ERP states:", e);
     }
@@ -1263,19 +1269,46 @@ export default function App() {
         isOpen={isChangePwdOpen}
         onClose={() => setIsChangePwdOpen(false)}
         currentUser={currentUser}
-        onConfirmChange={(oldPass, newPass) => {
+        onConfirmChange={async (oldPass, newPass) => {
           if (!currentUser) return false;
-          const userDB = users.find(u => u.username === currentUser.username);
-          if (!userDB || userDB.password !== oldPass) {
-            return false; //old verification failure
+          // Find the user in erpUsers first (since erpUsers is the source of truth), fall back to users
+          const targetList = erpUsers.length > 0 ? erpUsers : users;
+          const userDB = targetList.find(u => u.username === currentUser.username);
+          
+          if (!userDB || (userDB.password !== oldPass && userDB.pin !== oldPass)) {
+            return false; // old verification failure
           }
-          const modUsers = users.map(u => u.username === currentUser.username ? { ...u, password: newPass } : u);
-          syncUsersList(modUsers);
-          const activeSelf = { ...currentUser, password: newPass };
-          setCurrentUser(activeSelf);
-          sessionStorage.setItem('salesCurrentUser', JSON.stringify(activeSelf));
-          addToast('🎉 您的个人密码修改保存成功，请妥善保管。', 'success');
-          return true;
+          
+          const updatedUser: User = { 
+            ...userDB, 
+            password: newPass.trim(),
+            pin: newPass.trim() // Synchronize both password and pin fields
+          };
+          
+          try {
+            // 1. Sync and save to Cloud Relational Database
+            await DbService.saveUser(updatedUser, { 
+              id: currentUser.id, 
+              name: currentUser.username, 
+              role: currentUser.role 
+            });
+            
+            // 2. Sync local states and local storage
+            const modUsers = targetList.map(u => u.username === currentUser.username ? updatedUser : u);
+            setErpUsers(modUsers);
+            syncUsersList(modUsers);
+            
+            const activeSelf = { ...currentUser, password: newPass.trim(), pin: newPass.trim() };
+            setCurrentUser(activeSelf);
+            sessionStorage.setItem('salesCurrentUser', JSON.stringify(activeSelf));
+            
+            addToast('🎉 您的个人密码已成功同步修改至云端，且本地已实时刷新！', 'success');
+            return true;
+          } catch (err: any) {
+            console.error("Failed to change password in DB:", err);
+            addToast(`❌ 修改密码失败：${err.message || '网络连接超时'}`, 'error');
+            return false;
+          }
         }}
       />
 

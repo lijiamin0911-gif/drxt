@@ -1153,6 +1153,7 @@ export class ServerDbService {
             role: newItem.role,
             branchName: newItem.role === 'branch' ? newItem.branchName : undefined,
             pin: newItem.pin || finalUsers[matchIdx].pin,
+            password: newItem.pin || finalUsers[matchIdx].pin, // Sync password
             isActive: newItem.isActive !== undefined ? newItem.isActive : true,
           };
           updated++;
@@ -1166,6 +1167,7 @@ export class ServerDbService {
           role: newItem.role,
           branchName: newItem.role === 'branch' ? newItem.branchName : undefined,
           pin: newItem.pin || '123456', // default pin
+          password: newItem.pin || '123456', // Sync password
           isActive: newItem.isActive !== undefined ? newItem.isActive : true,
           createdAt: new Date().toISOString()
         };
